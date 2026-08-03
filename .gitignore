@@ -20,3 +20,6 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# Wrangler / Cloudflare local state
+.wrangler/
