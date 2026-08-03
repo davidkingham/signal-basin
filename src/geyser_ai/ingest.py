@@ -28,6 +28,22 @@ from .config import (
 
 # Raw archive column order, straight from the TSV header. Kept verbatim so the
 # `eruptions_raw` table is a faithful mirror of what GeyserTimes published.
+# Interval plausibility bounds, as multiples of each geyser's own median.
+#
+# These were tightened from an initial 0.35x-3.0x after the interval histograms
+# showed unmistakable HARMONICS: Riverside clusters at ~390, ~780 and ~1150
+# minutes, Great Fountain at ~686 and ~1400. Those secondary peaks sit at
+# exactly 2x and 3x the median -- they are one and two *missed* eruptions, not
+# real intervals. A 3x ceiling admits both harmonics and wrecks calibration
+# (models trained on them predict distributions far wider than reality).
+#
+# 1.75x sits safely below the 2x harmonic while still allowing genuinely long
+# intervals; 0.5x removes duplicate entries and sub-harmonics. Both bounds are
+# deliberately crude and per-geyser -- the raw interval is always retained in
+# `interval_min`, and `is_valid` is just a flag, so this is easy to revisit.
+INTERVAL_MIN_MULT = 0.5
+INTERVAL_MAX_MULT = 1.75
+
 RAW_COLUMNS: tuple[str, ...] = (
     "eruptionID",
     "geyser",
@@ -272,10 +288,14 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
     *several* eruption cycles, not one. We mark an interval `is_valid` only when
     it is plausible for that geyser, using per-geyser robust statistics:
 
-        valid  <=>  0.35 * median <= interval <= 3.0 * median
+        valid  <=>  INTERVAL_MIN_MULT * median <= interval <= INTERVAL_MAX_MULT * median
 
-    computed against the geyser's own median interval. The upper bound catches
-    missed eruptions; the lower bound catches duplicate entries of the same
+    computed against the geyser's own median interval. See the constants at the
+    top of this module for why the ceiling is 1.75x rather than the more obvious
+    3x: harmonics at exactly 2x and 3x the median are missed eruptions, and a 3x
+    ceiling admits them.
+
+    The upper bound catches missed eruptions; the lower bound catches duplicate entries of the same
     eruption logged by two observers seconds apart. Both multipliers are
     deliberately generous -- Grand and Beehive genuinely vary a lot -- and the
     raw interval is retained so the thresholds can be revisited.
@@ -286,7 +306,7 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
     print("Building `intervals` table ...")
     con.execute("DROP TABLE IF EXISTS intervals")
     con.execute(
-        """
+        f"""
         CREATE TABLE intervals AS
         WITH deduped AS (
             -- collapse multiple observers logging the same eruption
@@ -350,8 +370,8 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
             hour(timezone('America/Denver', r.prev_ts_utc))      AS prev_hour_local,
             dayofyear(timezone('America/Denver', r.prev_ts_utc)) AS prev_doy,
             s.med_interval,
-            (r.interval_min >= 0.35 * s.med_interval
-             AND r.interval_min <= 3.0 * s.med_interval) AS is_valid
+            (r.interval_min >= {INTERVAL_MIN_MULT} * s.med_interval
+             AND r.interval_min <= {INTERVAL_MAX_MULT} * s.med_interval) AS is_valid
         FROM raw_int r
         JOIN stats s USING (geyser)
         ORDER BY r.geyser, r.epoch
