@@ -12,7 +12,8 @@ their public data.
 
 ## Status
 
-Phase 0 (ingestion) and Phase 1 (prediction engine + backtest) are complete. See
+Phase 0 (ingestion), Phase 1 (prediction engine + backtest) and Phase 2 (API,
+dashboard, MCP server) are complete. See
 [`reports/calibration_report.md`](reports/calibration_report.md) for the full
 metrics table and calibration plots.
 
@@ -38,6 +39,16 @@ uv run geyser-ai backtest --geyser "Old Faithful" --years 5
 # Next-eruption prediction from the latest data in the DB (table + JSON)
 uv run geyser-ai predict
 uv run geyser-ai predict --geyser Grand --json
+
+# Top up the archive with entries logged since the snapshot (REST API v5)
+uv run geyser-ai sync
+
+# Serve the JSON API + mobile dashboard at http://127.0.0.1:8000/
+uv run geyser-ai serve
+uv run geyser-ai serve --host 0.0.0.0 --port 8137
+
+# Run the MCP server over stdio
+uv run geyser-ai mcp
 ```
 
 ## How it works
@@ -210,6 +221,83 @@ meaningful cross-version signal, and calibration improved on every geyser. Castl
 CRPS rose (104 -> 110) purely because its evaluation set became harder after the
 two-stage filter removed contaminated easy cases; its coverage improved (50%: 70% ->
 59%, 90%: 83% -> 88%).
+
+## Serving predictions
+
+`uv run geyser-ai serve` starts a FastAPI app with the JSON API and a
+single-page dashboard. Interactive API docs are at `/docs`.
+
+| Endpoint | What it returns |
+|---|---|
+| `GET /` | The dashboard |
+| `GET /api/predictions?hours=12&points=96` | All seven geysers, sorted soonest first: median, 50%/90% windows, expected missed eruptions, data age, and a probability-density curve for charting |
+| `GET /api/predictions/{geyser}?points=240` | One geyser, denser curve |
+| `GET /api/eruptions/recent?hours=24` | Recently logged eruptions (`geyser=` and `targets_only=` filters) |
+| `GET /api/stats?geyser=Grand` | Interval statistics per geyser |
+| `GET /api/health` | Snapshot age, row counts, sync state |
+
+**Freshness.** The archive snapshot is downloaded once and never re-fetched
+automatically. `sync.py` tops it up from the documented
+`entries_recent/{minutes}` endpoint, sizing the lookback from the gap since the
+newest row we already hold so a single request bridges it. Responses are cached
+with a five-minute TTL — GeyserTimes' policy calls polling the same URL more
+than once a minute abusive — and a plain identifying User-Agent is sent rather
+than a spoofed browser one. Network failures set an `error` field instead of
+raising: a stale prediction with an honest age beats a broken page. In practice
+this takes the data age from ~17 hours (archive only) to a few minutes.
+
+### Dashboard
+
+Mobile-first, no build step, served from a single self-contained HTML file.
+The design is deliberate rather than templated:
+
+- **The signature is the probability ribbon.** Every geyser is drawn on *one
+  shared 12-hour axis*, so the page reads top-to-bottom as a single instrument
+  and you can see which eruption lands first. The width of the smear **is** the
+  confidence: Daisy is a needle, Beehive a broad wash. Honest uncertainty is the
+  visually dominant object on the page, not a caveat in small print.
+- The 50%/90% bands are **clipped to the density curve**, so they shade actual
+  probability mass rather than sitting over it as opaque blocks.
+- Palette comes from the subject — deep hot-spring teal as the single sequential
+  hue, thermophile orange reserved solely for the `NOW` marker, warm sinter
+  neutrals. Light and dark are both selected, not an automatic inversion.
+- Monospace for every time and countdown: tabular figures read like the data
+  loggers this subject actually uses, and they stop the layout jittering on the
+  five-minute auto-refresh.
+- The community's `wc` / `ie` / `E` shorthand survives as chips — a nod to the
+  classic chat.geysertimes.org dashboard that gazers already know.
+
+### MCP server
+
+`uv run geyser-ai mcp` speaks stdio and exposes three tools — `get_predictions`,
+`get_recent_eruptions`, `get_geyser_stats` — as thin wrappers over the same
+`service.py` functions the HTTP API calls, so the two transports cannot drift
+apart. Register it with any MCP client:
+
+```json
+{
+  "mcpServers": {
+    "geyser-ai": {
+      "command": "uv",
+      "args": ["run", "geyser-ai", "mcp"],
+      "cwd": "/path/to/geyser-ai"
+    }
+  }
+}
+```
+
+### Architecture
+
+```
+ingest.py ──> DuckDB ──┐
+sync.py   ──>          │
+                       ├─> service.py ─┬─> api.py         (HTTP + dashboard)
+models.py ─> predict.py┘               └─> mcp_server.py  (stdio)
+           backtest.py ─> report.py    (offline evaluation)
+```
+
+`service.py` is the single read layer; `api.py` and `mcp_server.py` are
+transports over it and hold no logic of their own.
 
 ## Data attribution and gentle use
 

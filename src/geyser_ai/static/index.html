@@ -26,6 +26,7 @@
   --ink-2:#4a5a57;
   --ink-3:#7c8a86;
 
+  --brand:#0d6b78;
   --band-90:rgba(13,107,120,.13);
   --band-50:rgba(13,107,120,.28);
   --fill-top:rgba(34,184,196,.85);
@@ -39,7 +40,7 @@
   :root:not([data-theme=light]){
     --surface:#04252b; --card:#0a3138; --line:#12454e;
     --ink:#eaf6f6; --ink-2:#a8c6c8; --ink-3:#6f9298;
-    --pool-300:#3fd0da;
+    --pool-300:#3fd0da; --brand:#3fd0da;
     --band-90:rgba(63,208,218,.13); --band-50:rgba(63,208,218,.26);
     --fill-top:rgba(63,208,218,.8); --fill-bot:rgba(63,208,218,.05);
     --mat:#ff7a45;  --amber:#e0a33c;
@@ -48,7 +49,7 @@
 :root[data-theme=dark]{
   --surface:#04252b; --card:#0a3138; --line:#12454e;
   --ink:#eaf6f6; --ink-2:#a8c6c8; --ink-3:#6f9298;
-  --pool-300:#3fd0da;
+  --pool-300:#3fd0da; --brand:#3fd0da;
   --band-90:rgba(63,208,218,.13); --band-50:rgba(63,208,218,.26);
   --fill-top:rgba(63,208,218,.8); --fill-bot:rgba(63,208,218,.05);
   --mat:#ff7a45;  --amber:#e0a33c;
@@ -71,9 +72,7 @@ h1{
   font-size:19px;font-weight:800;margin:0;
   letter-spacing:.14em;text-transform:uppercase;
 }
-h1 .ai{color:var(--pool-500)}
-:root[data-theme=dark] h1 .ai,
-@media (prefers-color-scheme:dark){h1 .ai{color:var(--pool-300)}}
+h1 .ai{color:var(--brand)}
 .clock{font-family:var(--mono);font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink-2)}
 .sub{
   margin-top:6px;font-family:var(--mono);font-size:11.5px;
@@ -119,10 +118,8 @@ button.theme:focus-visible{outline:2px solid var(--pool-500);outline-offset:2px}
 }
 .until{
   font-family:var(--mono);font-size:16px;font-variant-numeric:tabular-nums;
-  font-weight:700;white-space:nowrap;color:var(--pool-500);
+  font-weight:700;white-space:nowrap;color:var(--brand);
 }
-:root[data-theme=dark] .until{color:var(--pool-300)}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .until{color:var(--pool-300)}}
 .card.soon .until{color:var(--mat)}
 .at{
   font-family:var(--mono);font-size:12.5px;color:var(--ink-2);
@@ -169,8 +166,7 @@ h2{
 .ev .t{font-family:var(--mono);font-size:12px;color:var(--ink-3);
   font-variant-numeric:tabular-nums;min-width:42px}
 .ev .g{font-weight:600;flex:1}
-.ev .g.target{color:var(--pool-500)}
-:root[data-theme=dark] .ev .g.target{color:var(--pool-300)}
+.ev .g.target{color:var(--brand)}
 .ev .ago{font-family:var(--mono);font-size:11px;color:var(--ink-3);white-space:nowrap}
 
 .note{font-size:12px;color:var(--ink-3);margin:14px 0 6px;line-height:1.5}
@@ -273,6 +269,9 @@ function renderAxis(){
     const d = document.createElement("div");
     d.className = "axis-tick" + (cls ? " " + cls : "");
     d.style.left = (frac*100).toFixed(3) + "%";
+    // Ticks are centred on their time, but the last one sits at 100% and would
+    // hang off the edge, so pull it fully inside.
+    if (frac > 0.94) d.style.transform = "translateX(-100%)";
     d.textContent = label;
     el.appendChild(d);
   };
@@ -297,53 +296,69 @@ function ribbon(p){
     `50% chance between ${hhmm(p.window_50_utc[0])} and ${hhmm(p.window_50_utc[1])}`);
 
   const uid = "g" + Math.random().toString(36).slice(2,8);
-  svg.innerHTML = `<defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"  stop-color="var(--fill-top)"/>
-      <stop offset="100%" stop-color="var(--fill-bot)"/>
-    </linearGradient></defs>`;
+  const now = Date.now();
+  const mins = iso => (new Date(iso).getTime() - now) / 60000;
+  const px   = m => Math.max(0, Math.min(W, xf(m) * W));
+
+  // Build the density outline first: the credible bands are shaded *slices of
+  // the distribution*, so the curve has to exist before they can be clipped to
+  // it. Drawn as full-height rects they read as solid blocks and swallow the
+  // shape, which is precisely backwards for a chart about uncertainty.
+  let curve = "", areaPath = "";
+  if (p.density && p.density.length){
+    p.density.forEach((pt,i) => {
+      const x = px(mins(pt.t));
+      const y = base - pt.d * (base - 4);
+      curve += (i ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1);
+    });
+    const first = px(mins(p.density[0].t));
+    const last  = px(mins(p.density[p.density.length-1].t));
+    areaPath = `${curve}L${last.toFixed(1)},${base}L${first.toFixed(1)},${base}Z`;
+  }
+
+  svg.innerHTML = `<defs>
+      <linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"  stop-color="var(--fill-top)"/>
+        <stop offset="100%" stop-color="var(--fill-bot)"/>
+      </linearGradient>
+      ${areaPath ? `<clipPath id="c${uid}"><path d="${areaPath}"/></clipPath>` : ""}
+    </defs>`;
 
   const g = document.createElementNS(NS,"g");
   g.setAttribute("class","draw");
   svg.appendChild(g);
 
-  const now = Date.now();
-  const mins = iso => (new Date(iso).getTime() - now) / 60000;
-  const px   = m => Math.max(0, Math.min(W, xf(m) * W));
+  if (areaPath){
+    const area = document.createElementNS(NS,"path");
+    area.setAttribute("d", areaPath);
+    area.setAttribute("fill",`url(#${uid})`);
+    g.appendChild(area);
+  }
 
-  // 90% then 50% band — drawn under the curve so they read as ground
+  // 90% then 50%, clipped to the curve so they shade probability mass
+  const bandsG = document.createElementNS(NS,"g");
+  if (areaPath) bandsG.setAttribute("clip-path", `url(#c${uid})`);
   const band = (a,b,fill) => {
     const x1 = px(mins(a)), x2 = px(mins(b));
-    if (x2 - x1 < 0.6) return;
+    if (x2 - x1 < 0.4) return;
     const r = document.createElementNS(NS,"rect");
-    r.setAttribute("x",x1); r.setAttribute("y",2);
-    r.setAttribute("width",x2-x1); r.setAttribute("height",base-2);
+    r.setAttribute("x",x1); r.setAttribute("y",0);
+    r.setAttribute("width",x2-x1); r.setAttribute("height",base);
     r.setAttribute("fill",fill);
-    g.appendChild(r);
+    bandsG.appendChild(r);
   };
   band(p.window_90_utc[0], p.window_90_utc[1], "var(--band-90)");
   band(p.window_50_utc[0], p.window_50_utc[1], "var(--band-50)");
+  g.appendChild(bandsG);
 
-  // density area
-  if (p.density && p.density.length){
-    let d = "";
-    p.density.forEach((pt,i) => {
-      const x = px(mins(pt.t));
-      const y = base - pt.d * (base - 4);
-      d += (i ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1);
-    });
-    const first = px(mins(p.density[0].t));
-    const last  = px(mins(p.density[p.density.length-1].t));
-    const area = document.createElementNS(NS,"path");
-    area.setAttribute("d", `${d}L${last.toFixed(1)},${base}L${first.toFixed(1)},${base}Z`);
-    area.setAttribute("fill",`url(#${uid})`);
-    g.appendChild(area);
-
+  if (curve){
     const line = document.createElementNS(NS,"path");
-    line.setAttribute("d", d);
+    line.setAttribute("d", curve);
     line.setAttribute("fill","none");
-    line.setAttribute("stroke","var(--pool-500)");
+    line.setAttribute("stroke","var(--brand)");
     line.setAttribute("stroke-width","2");
     line.setAttribute("vector-effect","non-scaling-stroke");
+    line.setAttribute("stroke-linejoin","round");
     g.appendChild(line);
   }
 
@@ -364,14 +379,18 @@ function ribbon(p){
   nl.setAttribute("vector-effect","non-scaling-stroke");
   g.appendChild(nl);
 
-  // last logged eruption, when it falls inside the visible past
+  // Last logged eruption, when it falls inside the visible past. A tick rather
+  // than a dot: the viewBox is stretched horizontally, so a circle renders as
+  // an oval, but a vertical line with a non-scaling stroke stays honest.
   const lastM = mins(p.last_eruption_utc);
   if (lastM > -PAST_H*60){
-    const c = document.createElementNS(NS,"circle");
-    c.setAttribute("cx",px(lastM)); c.setAttribute("cy",base);
-    c.setAttribute("r","3.5");
-    c.setAttribute("fill","var(--ink-3)");
-    g.appendChild(c);
+    const t = document.createElementNS(NS,"line");
+    const lx = px(lastM);
+    t.setAttribute("x1",lx); t.setAttribute("x2",lx);
+    t.setAttribute("y1",base-5); t.setAttribute("y2",base+5);
+    t.setAttribute("stroke","var(--ink-3)"); t.setAttribute("stroke-width","2");
+    t.setAttribute("vector-effect","non-scaling-stroke");
+    g.appendChild(t);
   }
   return svg;
 }
