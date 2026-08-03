@@ -119,5 +119,55 @@ def predict(
     print(jsonlib.dumps(results, indent=2))
 
 
+@app.command()
+def sync(
+    force: bool = typer.Option(False, "--force", help="Ignore the cache TTL."),
+    minutes: int = typer.Option(None, "--minutes", help="Explicit lookback window."),
+) -> None:
+    """Pull recent entries from the GeyserTimes REST API into the database."""
+    from .sync import sync_recent
+
+    if not DB_PATH.exists():
+        raise typer.BadParameter(f"No database at {DB_PATH}. Run `geyser-ai ingest` first.")
+    res = sync_recent(force=force, minutes=minutes)
+    if res.get("error"):
+        console.print(f"[red]Sync failed:[/red] {res['error']}")
+        raise typer.Exit(1)
+    if res.get("cached"):
+        console.print(
+            f"[dim]Cached; next refresh in {res['seconds_until_refresh']}s. "
+            f"{res['n_total']} rows held.[/dim]"
+        )
+        return
+    console.print(
+        f"[green]Synced[/green] {res['n_last']} entries "
+        f"(lookback {res['lookback_min']} min); {res['n_total']} rows held."
+    )
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8000, "--port"),
+    reload: bool = typer.Option(False, "--reload", help="Auto-reload for development."),
+) -> None:
+    """Serve the JSON API and the dashboard."""
+    from .api import serve as _serve
+
+    if not DB_PATH.exists():
+        raise typer.BadParameter(f"No database at {DB_PATH}. Run `geyser-ai ingest` first.")
+    console.print(f"[green]Dashboard:[/green] http://{host}:{port}/")
+    console.print(f"[dim]API docs:  http://{host}:{port}/docs[/dim]")
+    _serve(host=host, port=port, reload=reload)
+
+
+@app.command()
+def mcp() -> None:
+    """Run the MCP server over stdio."""
+    from .mcp_server import main as _main
+
+    _main()
+
+
 if __name__ == "__main__":
     app()

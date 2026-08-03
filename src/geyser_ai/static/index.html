@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Geyser AI — next eruptions</title>
+<meta name="description" content="Probabilistic next-eruption predictions for Yellowstone geysers, built on public GeyserTimes data.">
+<meta name="color-scheme" content="light dark">
+<style>
+/* ─────────────────────────────────────────────────────────────
+   Palette drawn from the subject: the colours of a hot spring.
+   Deep pool teal is the sequential ramp (one hue, light→dark).
+   Thermophile orange is the single warm accent, reserved for NOW.
+   Neutrals are warm sinter mineral, never pure grey.
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --pool-900:#04252b; --pool-700:#0a4a55; --pool-500:#0d6b78;
+  --pool-300:#22b8c4; --pool-100:#bfe6ea;
+  --mat:#d9541f;            /* now marker / urgency  */
+  --amber:#b8791a;          /* staleness             */
+
+  --surface:#f4f1e9;        /* sinter                */
+  --card:#fffefa;
+  --line:#ddd7c9;
+  --ink:#12211f;
+  --ink-2:#4a5a57;
+  --ink-3:#7c8a86;
+
+  --band-90:rgba(13,107,120,.13);
+  --band-50:rgba(13,107,120,.28);
+  --fill-top:rgba(34,184,196,.85);
+  --fill-bot:rgba(13,107,120,.06);
+
+  --r:14px;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme=light]){
+    --surface:#04252b; --card:#0a3138; --line:#12454e;
+    --ink:#eaf6f6; --ink-2:#a8c6c8; --ink-3:#6f9298;
+    --pool-300:#3fd0da;
+    --band-90:rgba(63,208,218,.13); --band-50:rgba(63,208,218,.26);
+    --fill-top:rgba(63,208,218,.8); --fill-bot:rgba(63,208,218,.05);
+    --mat:#ff7a45;  --amber:#e0a33c;
+  }
+}
+:root[data-theme=dark]{
+  --surface:#04252b; --card:#0a3138; --line:#12454e;
+  --ink:#eaf6f6; --ink-2:#a8c6c8; --ink-3:#6f9298;
+  --pool-300:#3fd0da;
+  --band-90:rgba(63,208,218,.13); --band-50:rgba(63,208,218,.26);
+  --fill-top:rgba(63,208,218,.8); --fill-bot:rgba(63,208,218,.05);
+  --mat:#ff7a45;  --amber:#e0a33c;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--surface); color:var(--ink);
+  font-family:var(--sans); font-size:15px; line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.wrap{max-width:720px;margin:0 auto;padding:0 14px}
+
+/* ── header ─────────────────────────────────────────────── */
+header{padding:22px 0 12px}
+.brand{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+h1{
+  font-size:19px;font-weight:800;margin:0;
+  letter-spacing:.14em;text-transform:uppercase;
+}
+h1 .ai{color:var(--pool-500)}
+:root[data-theme=dark] h1 .ai,
+@media (prefers-color-scheme:dark){h1 .ai{color:var(--pool-300)}}
+.clock{font-family:var(--mono);font-size:15px;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.sub{
+  margin-top:6px;font-family:var(--mono);font-size:11.5px;
+  letter-spacing:.04em;color:var(--ink-3);
+  display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--pool-300);display:inline-block}
+.dot.warn{background:var(--amber)} .dot.bad{background:var(--mat)}
+button.theme{
+  background:none;border:1px solid var(--line);color:var(--ink-3);
+  border-radius:99px;font-family:var(--mono);font-size:10.5px;
+  padding:3px 9px;cursor:pointer;letter-spacing:.08em;
+}
+button.theme:hover{color:var(--ink);border-color:var(--ink-3)}
+button.theme:focus-visible{outline:2px solid var(--pool-500);outline-offset:2px}
+
+/* ── shared time axis (the page is one instrument) ──────── */
+.axis{
+  position:sticky;top:0;z-index:5;
+  background:color-mix(in srgb,var(--surface) 92%,transparent);
+  backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);
+  padding:7px 0 5px;margin-bottom:2px;
+}
+.axis-inner{position:relative;height:15px}
+.axis-tick{
+  position:absolute;top:0;font-family:var(--mono);font-size:10px;
+  color:var(--ink-3);letter-spacing:.05em;transform:translateX(-50%);
+  white-space:nowrap;
+}
+.axis-tick.now{color:var(--mat);font-weight:700;transform:translateX(-2px)}
+
+/* ── geyser card ────────────────────────────────────────── */
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:13px 14px 10px;margin:9px 0;
+}
+.card.soon{border-color:var(--mat)}
+.row1{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.name{
+  font-size:15px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+  margin:0;line-height:1.15;
+}
+.until{
+  font-family:var(--mono);font-size:16px;font-variant-numeric:tabular-nums;
+  font-weight:700;white-space:nowrap;color:var(--pool-500);
+}
+:root[data-theme=dark] .until{color:var(--pool-300)}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .until{color:var(--pool-300)}}
+.card.soon .until{color:var(--mat)}
+.at{
+  font-family:var(--mono);font-size:12.5px;color:var(--ink-2);
+  font-variant-numeric:tabular-nums;margin-top:1px;
+}
+
+/* ribbon */
+.ribbon{width:100%;height:56px;display:block;margin:9px 0 6px;overflow:visible}
+.ribbon .draw{opacity:0;animation:rise .5s cubic-bezier(.2,.7,.3,1) forwards}
+@keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  .ribbon .draw{animation:none;opacity:1}
+}
+
+/* windows — uncertainty is the point, so it gets real estate */
+.wins{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);
+  font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.wins b{font-weight:700;color:var(--ink-3);letter-spacing:.06em}
+.swatch{display:inline-block;width:9px;height:9px;border-radius:2px;
+  vertical-align:-1px;margin-right:4px}
+.sw50{background:var(--band-50)} .sw90{background:var(--band-90)}
+
+/* flag chips — the community's own shorthand, kept */
+.chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;align-items:center}
+.chip{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;
+  border:1px solid var(--line);color:var(--ink-3);
+  padding:1.5px 6px;border-radius:99px;
+}
+.chip.warn{border-color:var(--amber);color:var(--amber)}
+.chip.stale{border-color:var(--mat);color:var(--mat)}
+
+/* ── recent feed ────────────────────────────────────────── */
+h2{
+  font-size:11.5px;font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-3);margin:26px 0 8px;font-weight:600;
+}
+.feed{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.ev{
+  display:flex;align-items:baseline;gap:10px;padding:7px 13px;
+  border-top:1px solid var(--line);font-size:13.5px;
+}
+.ev:first-child{border-top:none}
+.ev .t{font-family:var(--mono);font-size:12px;color:var(--ink-3);
+  font-variant-numeric:tabular-nums;min-width:42px}
+.ev .g{font-weight:600;flex:1}
+.ev .g.target{color:var(--pool-500)}
+:root[data-theme=dark] .ev .g.target{color:var(--pool-300)}
+.ev .ago{font-family:var(--mono);font-size:11px;color:var(--ink-3);white-space:nowrap}
+
+.note{font-size:12px;color:var(--ink-3);margin:14px 0 6px;line-height:1.5}
+.err{
+  background:var(--card);border:1px solid var(--mat);border-radius:var(--r);
+  padding:12px 14px;color:var(--mat);font-size:13.5px;margin:10px 0;
+}
+footer{padding:22px 0 30px;font-size:11.5px;color:var(--ink-3);line-height:1.6}
+footer a{color:var(--ink-2)}
+.skel{opacity:.35}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="brand">
+    <h1>Geyser<span class="ai"> AI</span></h1>
+    <div class="clock" id="clock">--:--</div>
+  </div>
+  <div class="sub">
+    <span><span class="dot" id="status-dot"></span> <span id="status">loading…</span></span>
+    <button class="theme" id="theme" type="button">theme</button>
+  </div>
+</header>
+
+<div class="axis">
+  <div class="axis-inner" id="axis"></div>
+</div>
+
+<main id="cards" aria-live="polite">
+  <div class="card skel"><div class="row1"><h3 class="name">loading…</h3></div></div>
+</main>
+
+<h2>Recently logged</h2>
+<div class="feed" id="feed"><div class="ev"><span class="g">loading…</span></div></div>
+
+<footer>
+  Predictions are probability distributions, not promises — the shaded band is
+  where the eruption actually lands 50% and 90% of the time, backtested against
+  history. Times are park time (America/Denver).<br><br>
+  Eruption data from <a href="https://geysertimes.org">GeyserTimes.org</a> and its
+  volunteer observers. This is an independent open-source project.
+</footer>
+
+</div>
+<script>
+/* ── config ─────────────────────────────────────────────── */
+const HOURS = 12;            // future span of the shared axis
+const PAST_H = 1;            // shown before "now", so the marker sits inside
+const SPAN = PAST_H + HOURS; // total hours across the ribbon
+const REFRESH_MS = 5 * 60 * 1000;
+const TARGETS = new Set(["Old Faithful","Grand","Daisy","Riverside","Castle","Great Fountain","Beehive"]);
+
+let lastData = null;
+
+/* ── helpers ────────────────────────────────────────────── */
+const pad = n => String(n).padStart(2,"0");
+const parkNow = () => new Date();
+
+function parkClock(){
+  const s = new Intl.DateTimeFormat("en-US",{
+    timeZone:"America/Denver", hour:"2-digit", minute:"2-digit",
+    second:"2-digit", hour12:false, timeZoneName:"short"
+  }).format(new Date());
+  document.getElementById("clock").textContent = s;
+}
+
+function hhmm(iso){
+  return new Intl.DateTimeFormat("en-US",{
+    timeZone:"America/Denver", hour:"2-digit", minute:"2-digit", hour12:false
+  }).format(new Date(iso));
+}
+
+/** minutes from now → fraction across the ribbon */
+function xf(mins){ return (PAST_H*60 + mins) / (SPAN*60); }
+
+function humanMins(m){
+  if (m == null || !isFinite(m)) return "—";
+  if (m < -90) return "overdue";
+  if (m < 1)  return "due now";
+  if (m < 60) return `in ${Math.round(m)} min`;
+  const h = Math.floor(m/60), r = Math.round(m%60);
+  return r ? `in ${h}h ${r}m` : `in ${h}h`;
+}
+
+function humanAgo(m){
+  if (m < 1) return "just now";
+  if (m < 60) return `${Math.round(m)}m ago`;
+  const h = Math.floor(m/60);
+  return h < 24 ? `${h}h ago` : `${Math.floor(h/24)}d ago`;
+}
+
+/* ── shared axis ────────────────────────────────────────── */
+function renderAxis(){
+  const el = document.getElementById("axis");
+  el.innerHTML = "";
+  const now = new Date();
+  const mk = (frac, label, cls) => {
+    const d = document.createElement("div");
+    d.className = "axis-tick" + (cls ? " " + cls : "");
+    d.style.left = (frac*100).toFixed(3) + "%";
+    d.textContent = label;
+    el.appendChild(d);
+  };
+  mk(xf(0), "NOW", "now");
+  for (let h = 3; h <= HOURS; h += 3){
+    const t = new Date(now.getTime() + h*3600e3);
+    mk(xf(h*60), hhmm(t.toISOString()));
+  }
+}
+
+/* ── the ribbon: uncertainty painted on the shared axis ─── */
+function ribbon(p){
+  const W = 1000, H = 56, base = H - 9;
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS,"svg");
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  svg.setAttribute("preserveAspectRatio","none");
+  svg.setAttribute("class","ribbon");
+  svg.setAttribute("role","img");
+  svg.setAttribute("aria-label",
+    `${p.geyser}: most likely ${hhmm(p.predicted_utc)}, ` +
+    `50% chance between ${hhmm(p.window_50_utc[0])} and ${hhmm(p.window_50_utc[1])}`);
+
+  const uid = "g" + Math.random().toString(36).slice(2,8);
+  svg.innerHTML = `<defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="var(--fill-top)"/>
+      <stop offset="100%" stop-color="var(--fill-bot)"/>
+    </linearGradient></defs>`;
+
+  const g = document.createElementNS(NS,"g");
+  g.setAttribute("class","draw");
+  svg.appendChild(g);
+
+  const now = Date.now();
+  const mins = iso => (new Date(iso).getTime() - now) / 60000;
+  const px   = m => Math.max(0, Math.min(W, xf(m) * W));
+
+  // 90% then 50% band — drawn under the curve so they read as ground
+  const band = (a,b,fill) => {
+    const x1 = px(mins(a)), x2 = px(mins(b));
+    if (x2 - x1 < 0.6) return;
+    const r = document.createElementNS(NS,"rect");
+    r.setAttribute("x",x1); r.setAttribute("y",2);
+    r.setAttribute("width",x2-x1); r.setAttribute("height",base-2);
+    r.setAttribute("fill",fill);
+    g.appendChild(r);
+  };
+  band(p.window_90_utc[0], p.window_90_utc[1], "var(--band-90)");
+  band(p.window_50_utc[0], p.window_50_utc[1], "var(--band-50)");
+
+  // density area
+  if (p.density && p.density.length){
+    let d = "";
+    p.density.forEach((pt,i) => {
+      const x = px(mins(pt.t));
+      const y = base - pt.d * (base - 4);
+      d += (i ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1);
+    });
+    const first = px(mins(p.density[0].t));
+    const last  = px(mins(p.density[p.density.length-1].t));
+    const area = document.createElementNS(NS,"path");
+    area.setAttribute("d", `${d}L${last.toFixed(1)},${base}L${first.toFixed(1)},${base}Z`);
+    area.setAttribute("fill",`url(#${uid})`);
+    g.appendChild(area);
+
+    const line = document.createElementNS(NS,"path");
+    line.setAttribute("d", d);
+    line.setAttribute("fill","none");
+    line.setAttribute("stroke","var(--pool-500)");
+    line.setAttribute("stroke-width","2");
+    line.setAttribute("vector-effect","non-scaling-stroke");
+    g.appendChild(line);
+  }
+
+  // baseline
+  const bl = document.createElementNS(NS,"line");
+  bl.setAttribute("x1",0); bl.setAttribute("x2",W);
+  bl.setAttribute("y1",base); bl.setAttribute("y2",base);
+  bl.setAttribute("stroke","var(--line)"); bl.setAttribute("stroke-width","1");
+  bl.setAttribute("vector-effect","non-scaling-stroke");
+  g.appendChild(bl);
+
+  // NOW — the one warm mark on the page
+  const nx = px(0);
+  const nl = document.createElementNS(NS,"line");
+  nl.setAttribute("x1",nx); nl.setAttribute("x2",nx);
+  nl.setAttribute("y1",0);  nl.setAttribute("y2",base+4);
+  nl.setAttribute("stroke","var(--mat)"); nl.setAttribute("stroke-width","2");
+  nl.setAttribute("vector-effect","non-scaling-stroke");
+  g.appendChild(nl);
+
+  // last logged eruption, when it falls inside the visible past
+  const lastM = mins(p.last_eruption_utc);
+  if (lastM > -PAST_H*60){
+    const c = document.createElementNS(NS,"circle");
+    c.setAttribute("cx",px(lastM)); c.setAttribute("cy",base);
+    c.setAttribute("r","3.5");
+    c.setAttribute("fill","var(--ink-3)");
+    g.appendChild(c);
+  }
+  return svg;
+}
+
+/* ── cards ──────────────────────────────────────────────── */
+function card(p){
+  const el = document.createElement("article");
+  el.className = "card" + (p.minutes_until != null && p.minutes_until < 45 ? " soon" : "");
+
+  if (p.error){
+    el.innerHTML = `<div class="row1"><h3 class="name">${p.geyser}</h3></div>
+      <div class="at">No prediction — ${p.error}</div>`;
+    return el;
+  }
+
+  const beyond = p.minutes_until > HOURS*60;
+  el.innerHTML = `
+    <div class="row1">
+      <h3 class="name">${p.geyser}</h3>
+      <div class="until">${humanMins(p.minutes_until)}</div>
+    </div>
+    <div class="at">${hhmm(p.predicted_utc)} most likely${beyond ? " · beyond the axis" : ""}</div>`;
+
+  el.appendChild(ribbon(p));
+
+  const wins = document.createElement("div");
+  wins.className = "wins";
+  wins.innerHTML =
+    `<span><b><span class="swatch sw50"></span>50%</b> ${hhmm(p.window_50_utc[0])}–${hhmm(p.window_50_utc[1])}</span>
+     <span><b><span class="swatch sw90"></span>90%</b> ${hhmm(p.window_90_utc[0])}–${hhmm(p.window_90_utc[1])}</span>`;
+  el.appendChild(wins);
+
+  const chips = document.createElement("div");
+  chips.className = "chips";
+  const add = (txt, cls="") => {
+    const s = document.createElement("span");
+    s.className = "chip " + cls; s.textContent = txt; chips.appendChild(s);
+  };
+  const ageH = p.data_age_hours;
+  if (ageH != null){
+    if (ageH < 2)      add(`logged ${humanAgo(ageH*60)}`);
+    else if (ageH < 8) add(`last seen ${Math.round(ageH)}h ago`, "warn");
+    else               add(`no report for ${Math.round(ageH)}h`, "stale");
+  }
+  if (p.data_is_stale && p.expected_missed_eruptions >= 0.5){
+    add(`~${p.expected_missed_eruptions.toFixed(1)} likely unlogged`, "stale");
+  }
+  add(p.model.replace(/_/g," "));
+  el.appendChild(chips);
+  return el;
+}
+
+/* ── feed ───────────────────────────────────────────────── */
+function renderFeed(data){
+  const f = document.getElementById("feed");
+  const items = (data.eruptions || []).slice(0, 40);
+  if (!items.length){ f.innerHTML = `<div class="ev"><span class="g">Nothing logged in the last 24 hours.</span></div>`; return; }
+  f.innerHTML = items.map(e => `
+    <div class="ev">
+      <span class="t">${e.time_local}</span>
+      <span class="g${TARGETS.has(e.geyser) ? " target" : ""}">${e.geyser}</span>
+      <span class="ago">${humanAgo(e.minutes_ago)}</span>
+    </div>`).join("");
+}
+
+/* ── load ───────────────────────────────────────────────── */
+async function load(){
+  try{
+    const [pr, ev] = await Promise.all([
+      fetch(`/api/predictions?hours=${HOURS}&points=140`).then(r => r.json()),
+      fetch(`/api/eruptions/recent?hours=24`).then(r => r.json())
+    ]);
+    lastData = pr;
+    renderAxis();
+
+    const cards = document.getElementById("cards");
+    cards.innerHTML = "";
+    pr.predictions.forEach(p => cards.appendChild(card(p)));
+    renderFeed(ev);
+
+    const n = pr.predictions.filter(p => !p.error).length;
+    const freshest = Math.min(...pr.predictions.filter(p => !p.error).map(p => p.data_age_hours));
+    const dot = document.getElementById("status-dot");
+    dot.className = "dot" + (freshest < 2 ? "" : freshest < 8 ? " warn" : " bad");
+    document.getElementById("status").textContent =
+      `${n} geysers · newest report ${humanAgo(freshest*60)}` +
+      (pr.sync && pr.sync.error ? " · live sync down" : "");
+  }catch(err){
+    document.getElementById("cards").innerHTML =
+      `<div class="err">Could not reach the prediction service. ${err}</div>`;
+    document.getElementById("status").textContent = "offline";
+    document.getElementById("status-dot").className = "dot bad";
+  }
+}
+
+/* ── theme toggle (auto by default) ─────────────────────── */
+document.getElementById("theme").addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const dark = cur ? cur === "dark"
+    : window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+  if (lastData) load();
+});
+
+parkClock();
+setInterval(parkClock, 1000);
+setInterval(renderAxis, 60000);
+load();
+setInterval(load, REFRESH_MS);
+</script>
+</body>
+</html>
