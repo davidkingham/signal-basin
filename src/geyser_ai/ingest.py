@@ -40,9 +40,9 @@ from .config import (
 # deliberately crude and per-geyser -- the raw interval is always retained in
 # `interval_min`, and `is_valid` is just a flag, so this is easy to revisit.
 #
-# The median these multiply is LOCAL (a centered rolling median over ~300
-# neighbouring eruptions), not global. See the `local_med` CTE below for why
-# that distinction turned out to matter more than the multipliers themselves.
+# The median these multiply is LOCAL and computed in two robust stages, not
+# global. See the `base_anchor` / `local_med` CTEs below -- that distinction
+# turned out to matter far more than the multipliers themselves.
 INTERVAL_MIN_MULT = 0.5
 INTERVAL_MAX_MULT = 1.75
 
@@ -323,27 +323,56 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
             FROM seq
             WHERE prev_epoch IS NOT NULL
         ),
-        -- LOCAL median, not a global one. Geyser intervals drift over decades:
-        -- Daisy ran a 142-minute median in 2019 and 111 in 2026. A single median
-        -- across the whole 1871-present record sets the ceiling by the OLD era,
-        -- so doubles of the MODERN interval (~222 min) slid under 1.75 x 142 =
-        -- 248 and survived as a phantom second mode -- which is exactly the
-        -- over-dispersion that wrecked Daisy's calibration.
+        -- TWO-STAGE LOCAL BASELINE.
         --
-        -- The window is centered, so this uses neighbouring eruptions on both
-        -- sides. That is deliberate: identifying corrupt records is a
-        -- preprocessing step, not a prediction, and a centered median tracks a
-        -- drifting baseline far better than a trailing one. The quantity is
+        -- Stage 0 problem: a single global median is wrong because intervals
+        -- drift over decades (Daisy ran a 142-minute median in 2019 and 111 in
+        -- 2026), so the ceiling gets set by the old era and doubles of the
+        -- MODERN interval survive as a phantom second mode.
+        --
+        -- Stage 1 problem: a plain LOCAL median is not enough either. Where
+        -- observation is poor, missed eruptions can be the MAJORITY of recorded
+        -- gaps, so the local median tracks the doubled value and then
+        -- self-validates the contamination. Great Fountain did exactly this --
+        -- its local median ranged up to 1361 against a true interval near 690.
+        --
+        -- The fix exploits an asymmetry: a missed eruption only ever ADDS time,
+        -- never subtracts it. So a LOW quantile is robust to the contamination
+        -- in a way the median is not.
+        --   base0 = local 25th percentile  -> robust anchor, sits in the true mode
+        --   med   = local median computed ONLY over gaps near that anchor
+        -- Stage 2's CASE returns NULL outside the near-mode band and median()
+        -- skips NULLs, so the refined median never sees the harmonics.
+        --
+        -- Measured effect on the post-filter p95/median ratio (~1.2-1.5 means a
+        -- clean unimodal interval distribution, ~2 means harmonics survived):
+        -- Great Fountain 2.01 -> 1.28, Beehive 1.59 -> 1.52, Grand 1.46 -> 1.40,
+        -- with Old Faithful, Daisy and Riverside unchanged and already clean.
+        --
+        -- The windows are centered. That is deliberate: identifying corrupt
+        -- records is preprocessing, not prediction, and a centered baseline
+        -- tracks a drifting interval far better than a trailing one. It is
         -- smooth and slowly-varying, so it carries no meaningful information
         -- about any individual interval.
-        local_med AS (
+        base_anchor AS (
             SELECT *,
-                   median(interval_min) OVER (
+                   quantile_cont(interval_min, 0.25) OVER (
                        PARTITION BY geyser ORDER BY epoch
-                       ROWS BETWEEN 150 PRECEDING AND 150 FOLLOWING
-                   ) AS med_interval
+                       ROWS BETWEEN 400 PRECEDING AND 400 FOLLOWING
+                   ) AS base0
             FROM raw_int
             WHERE interval_min > 0
+        ),
+        local_med AS (
+            SELECT *,
+                   median(
+                       CASE WHEN interval_min BETWEEN 0.55 * base0 AND 1.4 * base0
+                            THEN interval_min END
+                   ) OVER (
+                       PARTITION BY geyser ORDER BY epoch
+                       ROWS BETWEEN 300 PRECEDING AND 300 FOLLOWING
+                   ) AS med_interval
+            FROM base_anchor
         )
         SELECT
             r.eruption_id, r.geyser, r.ts_utc, r.ts_local, r.epoch,
@@ -368,7 +397,8 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
             hour(timezone('America/Denver', r.prev_ts_utc))      AS prev_hour_local,
             dayofyear(timezone('America/Denver', r.prev_ts_utc)) AS prev_doy,
             r.med_interval,
-            (r.interval_min >= {INTERVAL_MIN_MULT} * r.med_interval
+            (r.med_interval IS NOT NULL
+             AND r.interval_min >= {INTERVAL_MIN_MULT} * r.med_interval
              AND r.interval_min <= {INTERVAL_MAX_MULT} * r.med_interval) AS is_valid
         FROM local_med r
         ORDER BY r.geyser, r.epoch

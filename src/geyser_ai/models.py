@@ -368,6 +368,54 @@ class MinorConditionalModel:
         return Prediction(dist, self.name) if dist is not None else None
 
 
+class EntryTypeConditionalModel:
+    """Condition on whether the ANCHOR eruption came from an electronic logger.
+
+    Great Fountain is ~60% logger-recorded, and the two entry types behave very
+    differently. For 2015+ valid intervals:
+
+        logger -> logger    median 669 min, sd  95
+        human  -> human     median 708 min, sd 276   (mean 813 -- heavy right tail)
+
+    That is NOT a timestamp offset (an offset would push logger->human and
+    human->logger apart symmetrically while leaving the like-to-like pairs
+    alone, which is not what the data shows). It is a *data quality* difference:
+    a logger records every eruption, so consecutive logger entries are true
+    consecutive intervals, whereas human-only stretches still contain missed
+    eruptions that survived the validity filter.
+
+    So the useful move is a separate scale per anchor type rather than an offset
+    correction: predictions anchored to a logger entry deserve to be much
+    sharper than predictions anchored to a human report.
+    """
+
+    name = "entry_conditional"
+
+    def __init__(self, window: int = 400) -> None:
+        self.window = window
+
+    @staticmethod
+    def _lognorm_from(x: np.ndarray, min_n: int = 25) -> stats.rv_continuous | None:
+        x = x[np.isfinite(x) & (x > 0)]
+        if len(x) < min_n:
+            return None
+        logs = np.log(x)
+        sd = max(float(np.std(logs, ddof=1)), _MIN_SCALE)
+        return stats.lognorm(s=sd, scale=np.exp(float(np.mean(logs))))
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        h = history.tail(self.window)
+        if len(h) < 60 or "prev_electronic" not in h.columns:
+            return None
+        v = h["interval_min"].to_numpy(dtype=float)
+        pooled = self._lognorm_from(v)
+        is_e = bool(row.get("prev_electronic", False))
+        flag = h["prev_electronic"].astype(bool).to_numpy()
+        sub = v[flag] if is_e else v[~flag]
+        dist = self._lognorm_from(sub) or pooled
+        return Prediction(dist, self.name) if dist is not None else None
+
+
 class WeibullAFTModel:
     """Weibull AFT (lifelines) with covariates, refit periodically.
 
@@ -480,6 +528,10 @@ class WeibullAFTModel:
 # conditional model would just be a slower copy of `lognormal`.
 MINOR_MODE_GEYSERS = frozenset({"Castle", "Old Faithful"})
 
+# Geysers where electronic loggers supply enough entries for a per-entry-type
+# fit to have data on both sides of the split.
+LOGGER_HEAVY_GEYSERS = frozenset({"Great Fountain", "Daisy", "Castle", "Grand"})
+
 
 def default_models(geyser: str) -> list[Model]:
     """Model roster. Some models are only added where the physics warrants it."""
@@ -495,4 +547,6 @@ def default_models(geyser: str) -> list[Model]:
         models.append(DurationConditionalModel(window=400))
     if geyser in MINOR_MODE_GEYSERS:
         models.append(MinorConditionalModel(window=400))
+    if geyser in LOGGER_HEAVY_GEYSERS:
+        models.append(EntryTypeConditionalModel(window=400))
     return models
