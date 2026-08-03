@@ -136,8 +136,21 @@ def plot_reliability(recs: pd.DataFrame, geysers: list[str]) -> str:
         ax.set_aspect("equal")
     for ax in axes[len(present) :]:
         ax.set_visible(False)
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=6, fontsize=8, bbox_to_anchor=(0.5, -0.02))
+    # Legend must cover every model plotted anywhere, not just those on the
+    # first panel -- some models only apply to certain geysers.
+    seen: dict[str, object] = {}
+    for ax in axes:
+        for h, lab in zip(*ax.get_legend_handles_labels()):
+            seen.setdefault(lab, h)
+    ordered = [m for m in MODEL_ORDER if m in seen]
+    fig.legend(
+        [seen[m] for m in ordered],
+        ordered,
+        loc="lower center",
+        ncol=5,
+        fontsize=8,
+        bbox_to_anchor=(0.5, -0.03),
+    )
     fig.suptitle(
         "Calibration (PIT reliability) — on the diagonal is perfect",
         x=0.008,

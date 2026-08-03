@@ -68,8 +68,11 @@ Community-flagged `questionable` entries are excluded from the `eruptions` view.
 | `rolling_normal` | Dashboard-style rolling mean ± window, read as a normal |
 | `lognormal` / `weibull` | Rolling-window MLE fits |
 | `best_parametric` | Picks lognormal vs Weibull per prediction by held-out likelihood |
+| `adaptive_lognormal` | Changepoint detection + held-out selection of the window length |
 | `weibull_aft` | lifelines Weibull AFT with covariates, refit periodically |
 | `duration_lognormal` | Old Faithful only: short/long preceding-duration split |
+| `minor_conditional` | Castle & Old Faithful: conditions on whether the previous eruption was a *minor* |
+| `entry_conditional` | Logger-heavy geysers: conditions on whether the anchor came from an electronic logger |
 
 **Backtest.** Walk-forward over the last 3 years. At each evaluated eruption a
 model sees only intervals strictly earlier than the one it is predicting. All
@@ -81,57 +84,132 @@ empirical coverage of the nominal 50% and 90% intervals.
 
 Full table and figures: [`reports/calibration_report.md`](reports/calibration_report.md).
 
-Best CRPS per geyser (minutes; lower is better), walk-forward over the last 3 years:
+Best model per geyser, walk-forward over the last 3 years (CRPS in minutes, lower
+is better):
 
-| Geyser | Best model | CRPS | MAE | 50% cov | 90% cov | vs. baseline |
-|---|---|---:|---:|---:|---:|---:|
-| Old Faithful | `duration_lognormal` | 8.1 | 11.5 | 53% | 89% | −8.4% |
-| Grand | `lognormal` | 41.8 | 57.6 | 52% | 92% | −1.9% |
-| Daisy | `lognormal` | 12.9 | 14.9 | 87% | 92% | −8.9% |
-| Riverside | `best_parametric` | 14.3 | 18.3 | 54% | 91% | −0.8% |
-| Castle | `weibull` | 104.1 | 125.9 | 70% | 83% | −1.6% |
-| Great Fountain | `lognormal` | 47.8 | 65.5 | 57% | 92% | −3.0% |
-| Beehive | `rolling_normal` | 131.1 | 181.6 | 53% | 88% | 0.0% |
+| Geyser | Best model | CRPS | MAE | 50% cov | 90% cov |
+|---|---|---:|---:|---:|---:|
+| Old Faithful | `minor_conditional` | 4.5 | 6.1 | 59% | 94% |
+| Grand | `adaptive_lognormal` | 38.7 | 54.1 | 48% | 91% |
+| Daisy | `adaptive_lognormal` | 3.1 | 4.3 | 52% | 87% |
+| Riverside | `adaptive_lognormal` | 12.8 | 17.5 | 53% | 91% |
+| Castle | `minor_conditional` | 110.5 | 151.6 | 59% | 88% |
+| Great Fountain | `lognormal` | 45.6 | 62.9 | 55% | 91% |
+| Beehive | `rolling_normal` | 121.0 | 167.6 | 51% | 87% |
 
-Three findings worth stating plainly:
+### What actually moved the numbers
 
-**1. Data cleaning mattered far more than modeling.** The first run used a 3×-median
-ceiling for interval validity. The interval histograms then showed unmistakable
-harmonics — Riverside clusters at ~390, ~780 and ~1150 minutes, Great Fountain at
-~686 and ~1400 — which are one and two *missed* eruptions, not real intervals.
-Tightening the ceiling to 1.75× cut CRPS by far more than any model ever did:
+**Data cleaning beat modeling, repeatedly.** Three successive fixes to the interval
+validity filter each produced larger gains than any model ever did.
 
-| Geyser | Best CRPS @ 3× | Best CRPS @ 1.75× | Change |
+*1. Harmonics.* The first version used a 3x-median ceiling. Interval histograms
+showed unmistakable secondary peaks at exactly 2x and 3x the median — one and two
+*missed* eruptions, not real intervals. Tightening to 1.75x cut best-model CRPS by
+20-87% per geyser (Riverside 106.6 -> 14.3).
+
+*2. Drift.* A single median across the whole 1871-present record is wrong because
+intervals drift: Daisy ran a 142-minute median in 2019 and 111 in 2026, so doubles
+of the *modern* interval slid under a ceiling set by the *old* one. Daisy's nominal
+50% interval was covering 87%. Making the median local fixed it (CRPS 12.4 -> 3.2,
+coverage 87% -> 50%).
+
+*3. Self-validating contamination.* A plain local median then broke Great Fountain
+(CRPS 47.8 -> 145). Where observation is poor, missed eruptions are the *majority*
+of recorded gaps, so the local median tracks the doubled value and legitimises the
+contamination — Great Fountain's ran up to 1361 against a true interval near 690.
+The fix exploits an asymmetry: a missed eruption only ever *adds* time, so a low
+quantile is robust where the median is not. A local 25th percentile anchors the
+true mode, then the median is recomputed over only the gaps near that anchor.
+Post-filter p95/median (≈1.2-1.5 is clean unimodal, ≈2 means harmonics survived):
+Great Fountain 2.01 -> 1.28, Beehive 1.59 -> 1.52, Grand 1.46 -> 1.40.
+
+**The minor-eruption flag is the single best covariate found.** For Old Faithful the
+post-minor and post-major interval distributions are almost disjoint — median 70 min
+(p95 83) versus median 102 min (p05 91) — and 22% of recent eruptions are minors.
+Conditioning on it roughly halves CRPS (8.3 -> 4.5) and beats the classic
+duration-based split, because the observer-set flag is cleaner than raw duration
+data, which is often missing. For Castle the gain is in *variance* rather than
+location (post-minor sd 387 vs 164), and `minor_conditional` is its best model.
+Both are legitimate: the flag is recorded when the eruption is logged, so it is
+known at prediction time.
+
+**The lifelines covariate model still does not earn its complexity.** `weibull_aft`
+remains in the bottom half on essentially every geyser. Its early apparent win on
+Riverside (CRPS 106.6 vs 120.8) was an artifact of dirty data — it was using the
+previous interval to spot missed-eruption doubles. With the harmonics gone the
+signal vanished. The dashboard-style baseline is competitive throughout and wins
+outright on Beehive.
+
+**Electronic loggers: a negative result, and a data-quality one.** Great Fountain is
+~60% logger-recorded. Comparing entry-type transitions (2015+):
+
+| transition | n | median | sd |
 |---|---:|---:|---:|
-| Old Faithful | 10.1 | 8.1 | −20% |
-| Grand | 105.3 | 41.8 | −60% |
-| Daisy | 22.3 | 12.9 | −42% |
-| Riverside | 106.6 | 14.3 | **−87%** |
-| Castle | 245.2 | 104.1 | −58% |
-| Great Fountain | 194.7 | 47.8 | −75% |
-| Beehive | 178.8 | 131.1 | −27% |
+| logger -> logger | 2051 | 669 | 95 |
+| logger -> human | 627 | 665 | 88 |
+| human -> logger | 626 | 686 | 91 |
+| human -> human | 1139 | 708 | 276 |
 
-**2. The lifelines covariate model did not earn its complexity — reported honestly.**
-`weibull_aft` ranks in the *bottom half* on all seven geysers. On dirty data it
-looked like the clear winner on Riverside (CRPS 106.6 vs 120.8 for the next model);
-that entire advantage was an artifact — it was using the previous interval to
-detect "the last gap was a double, so this one might be too." Once the harmonics
-were removed the signal vanished and the simple rolling lognormal/Weibull fits beat
-it nearly everywhere. The dashboard-style baseline is competitive too, and actually
-*wins* on Beehive.
+This is **not** a timestamp offset — an offset would push the two mixed pairs apart
+symmetrically while leaving like-to-like alone, which is not the pattern. It is a
+data-quality difference: a logger catches every eruption, so consecutive logger
+entries are true intervals, whereas human-only stretches still contain missed ones
+(mean 813 vs median 708 is a heavy right tail). The implied model,
+`entry_conditional`, **does not help** (Great Fountain 46.0 vs 45.6 for plain
+lognormal). It is kept in the roster and reported rather than quietly dropped.
 
-**3. The one covariate that genuinely helps is Old Faithful's eruption duration.**
-`duration_lognormal`, which splits on whether the preceding eruption was shorter or
-longer than ~2.5 minutes, is the best model for Old Faithful (CRPS 8.06 vs 8.56 for
-the next best). The classic short/long duration → interval relationship still holds
-in current data.
+### Honest coverage
 
-**Remaining calibration gap:** Daisy's nominal 50% interval covers 87% of actuals.
-Daisy is extremely regular, and a rolling window wide enough to fit stably spans
-level shifts, so the fitted marginal is much wider than the local conditional. A
-shorter window or a changepoint-aware model is the obvious next step. Castle is also
-off (70% at nominal 50%), most likely because its major/minor eruption distinction
-is not modeled — 23% of Castle entries are flagged `minor`.
+Everything above is scored only on intervals that passed the validity filter — which
+excludes exactly the cases the filter exists to remove. A gazer on the boardwalk gets
+no such exemption. Re-scoring a plain rolling `lognormal` against **every** interval:
+
+| Geyser | % filter-rejected | 50% cov | 90% cov | 90% cov (filtered) |
+|---|---:|---:|---:|---:|
+| Old Faithful | 15.0% | 47% | 76% | 90% |
+| Grand | 17.9% | 39% | 76% | 91% |
+| Daisy | 21.9% | 41% | 69% | 89% |
+| Riverside | 36.5% | 37% | 59% | 92% |
+| Castle | 30.6% | 46% | 61% | 87% |
+| Great Fountain | 43.5% | 31% | 52% | 91% |
+| Beehive | 8.2% | 47% | 80% | 87% |
+
+The gap between the last two columns is the real-world cost of observation gaps.
+Treat the headline table as an upper bound on field reliability.
+
+### Missed eruptions at prediction time
+
+The naive forecast conditions on survival — *it hasn't erupted, so it's overdue* —
+which is only sound if we would certainly have seen it. In crowdsourced data that
+fails constantly: a silent 14 hours at Riverside usually means nobody was looking.
+
+`predict` therefore treats the geyser as a **renewal process** from the last *logged*
+eruption, with each eruption logged independently with probability `p_obs`. A path on
+which k eruptions fell inside the silent window is consistent with the evidence only
+if all k went unlogged, so it carries weight `(1 - p_obs)^k`. Weighting simulated
+paths that way interpolates between the regimes automatically:
+
+- **fresh data** (age << typical interval) — almost no path has a missed eruption, so
+  this reduces to ordinary survival conditioning;
+- **stale data** (age >> typical interval) — survival paths become astronomically
+  unlikely, weight shifts onto the k-missed hypotheses, and the forecast correctly
+  becomes *"it already went; the next one is roughly one interval from whenever
+  that was"*.
+
+`p_obs` is estimated from the data rather than tuned: it is the recent share of gaps
+that came through the validity filter as single intervals. The CLI reports the
+expected number of missed eruptions and flags stale rows. On a 17-hour-old snapshot
+Old Faithful reports ~9.4 expected missed eruptions and predicts the next one just
+after now, instead of claiming it is 17 hours overdue.
+
+### Caveat on before/after comparisons
+
+Each filter change alters *which* intervals are valid, so CRPS is not strictly
+comparable across versions — the evaluation set moves with it. Coverage is the more
+meaningful cross-version signal, and calibration improved on every geyser. Castle's
+CRPS rose (104 -> 110) purely because its evaluation set became harder after the
+two-stage filter removed contaminated easy cases; its coverage improved (50%: 70% ->
+59%, 90%: 83% -> 88%).
 
 ## Data attribution and gentle use
 

@@ -1,6 +1,6 @@
 # Calibration report
 
-Walk-forward backtest, last 1 years. Generated 2026-08-03 from the GeyserTimes complete archive.
+Walk-forward backtest, last 3 years. Generated 2026-08-03 from the GeyserTimes complete archive.
 
 At every evaluated eruption each model sees **only** intervals strictly earlier than the one it is predicting. All models are scored on the same set of target eruptions, so no model benefits from skipping hard cases.
 
@@ -13,12 +13,55 @@ At every evaluated eruption each model sees **only** intervals strictly earlier 
 
 | Geyser | Model | n | CRPS (min) | MAE (min) | 50% cov | 90% cov |
 |---|---|---:|---:|---:|---:|---:|
-| Riverside | **best_parametric** | 389 | 12.1 | 16.7 | 46.8% | 89.2% |
-| Riverside | rolling_normal | 389 | 12.2 | 16.2 | 49.9% | 90.7% |
-| Riverside | lognormal | 389 | 12.3 | 17.2 | 50.9% | 92.8% |
-| Riverside | adaptive_lognormal | 389 | 12.3 | 16.9 | 48.3% | 90.7% |
-| Riverside | weibull | 389 | 13.8 | 16.5 | 50.4% | 89.7% |
-| Riverside | weibull_aft | 389 | 20.7 | 28.2 | 60.9% ⚠ | 99.0% · |
+| Old Faithful | **minor_conditional** | 2,000 | 4.5 | 6.1 | 59.1% · | 93.8% |
+| Old Faithful | duration_lognormal | 2,000 | 8.3 | 11.7 | 53.5% | 89.6% |
+| Old Faithful | weibull | 2,000 | 8.9 | 12.3 | 52.7% | 90.2% |
+| Old Faithful | best_parametric | 2,000 | 8.9 | 12.5 | 52.5% | 89.5% |
+| Old Faithful | weibull_aft | 2,000 | 9.1 | 12.4 | 59.8% · | 92.0% |
+| Old Faithful | rolling_normal | 2,000 | 9.1 | 12.8 | 50.7% | 88.6% |
+| Old Faithful | lognormal | 2,000 | 9.1 | 13.0 | 52.8% | 89.7% |
+| Old Faithful | adaptive_lognormal | 2,000 | 9.2 | 13.1 | 52.1% | 89.2% |
+| Grand | **adaptive_lognormal** | 2,000 | 38.7 | 54.1 | 47.9% | 90.8% |
+| Grand | rolling_normal | 2,000 | 39.3 | 54.7 | 49.5% | 91.0% |
+| Grand | lognormal | 2,000 | 39.3 | 55.0 | 47.4% | 91.2% |
+| Grand | best_parametric | 2,000 | 39.9 | 55.8 | 46.9% | 91.3% |
+| Grand | weibull | 2,000 | 40.8 | 55.7 | 62.4% ⚠ | 92.9% |
+| Grand | entry_conditional | 2,000 | 42.1 | 58.5 | 45.8% | 89.5% |
+| Grand | weibull_aft | 2,000 | 47.1 | 63.3 | 55.2% · | 86.6% |
+| Daisy | **adaptive_lognormal** | 2,000 | 3.1 | 4.3 | 51.9% | 87.4% |
+| Daisy | rolling_normal | 2,000 | 3.2 | 4.3 | 50.3% | 86.8% |
+| Daisy | lognormal | 2,000 | 3.2 | 4.4 | 53.4% | 89.1% |
+| Daisy | best_parametric | 2,000 | 3.2 | 4.4 | 53.5% | 89.6% |
+| Daisy | entry_conditional | 2,000 | 3.4 | 4.7 | 53.7% | 90.5% |
+| Daisy | weibull | 2,000 | 3.5 | 4.4 | 68.2% ⚠ | 93.7% |
+| Daisy | weibull_aft | 2,000 | 5.1 | 7.0 | 66.2% ⚠ | 95.7% · |
+| Riverside | **adaptive_lognormal** | 1,585 | 12.8 | 17.5 | 53.3% | 91.2% |
+| Riverside | best_parametric | 1,585 | 12.8 | 17.5 | 55.0% · | 91.2% |
+| Riverside | lognormal | 1,585 | 12.9 | 17.8 | 57.0% · | 92.1% |
+| Riverside | rolling_normal | 1,585 | 12.9 | 17.3 | 51.7% | 90.5% |
+| Riverside | weibull | 1,585 | 14.2 | 17.4 | 54.4% | 92.0% |
+| Riverside | weibull_aft | 1,585 | 18.5 | 22.8 | 77.1% ⚠ | 99.3% · |
+| Castle | **minor_conditional** | 868 | 110.5 | 151.6 | 59.3% · | 88.0% |
+| Castle | lognormal | 868 | 118.2 | 151.0 | 65.8% ⚠ | 87.2% |
+| Castle | rolling_normal | 868 | 119.4 | 155.4 | 64.3% ⚠ | 85.8% |
+| Castle | adaptive_lognormal | 868 | 119.7 | 153.5 | 65.4% ⚠ | 87.0% |
+| Castle | entry_conditional | 868 | 120.0 | 150.4 | 69.5% ⚠ | 85.5% |
+| Castle | best_parametric | 868 | 120.0 | 154.2 | 66.8% ⚠ | 86.6% |
+| Castle | weibull | 868 | 120.9 | 156.5 | 67.6% ⚠ | 87.9% |
+| Castle | weibull_aft | 868 | 124.6 | 155.4 | 62.1% ⚠ | 80.0% ⚠ |
+| Great Fountain | **lognormal** | 408 | 45.6 | 62.9 | 55.1% · | 91.2% |
+| Great Fountain | best_parametric | 408 | 45.7 | 63.0 | 55.9% · | 91.9% |
+| Great Fountain | entry_conditional | 408 | 46.0 | 63.1 | 58.3% · | 93.4% |
+| Great Fountain | adaptive_lognormal | 408 | 46.0 | 63.9 | 53.2% | 90.2% |
+| Great Fountain | rolling_normal | 408 | 46.4 | 63.4 | 54.7% | 89.5% |
+| Great Fountain | weibull | 408 | 48.6 | 63.9 | 71.6% ⚠ | 95.3% · |
+| Great Fountain | weibull_aft | 408 | 48.8 | 63.8 | 74.0% ⚠ | 97.1% · |
+| Beehive | **rolling_normal** | 1,180 | 121.0 | 167.5 | 51.4% | 87.3% |
+| Beehive | adaptive_lognormal | 1,180 | 121.4 | 167.9 | 52.4% | 87.3% |
+| Beehive | lognormal | 1,180 | 124.3 | 172.4 | 51.3% | 87.4% |
+| Beehive | weibull | 1,180 | 126.1 | 175.3 | 56.4% · | 90.7% |
+| Beehive | best_parametric | 1,180 | 126.8 | 177.4 | 50.9% | 88.4% |
+| Beehive | weibull_aft | 1,180 | 170.0 | 249.1 | 48.5% | 94.4% |
 
 **Bold** = best CRPS for that geyser.
 
@@ -26,14 +69,20 @@ At every evaluated eruption each model sees **only** intervals strictly earlier 
 
 | Geyser | Best by CRPS | CRPS | Baseline CRPS | Improvement |
 |---|---|---:|---:|---:|
-| Riverside | best_parametric | 12.1 | 12.2 | 0.6% |
+| Old Faithful | minor_conditional | 4.5 | 9.1 | 50.6% |
+| Grand | adaptive_lognormal | 38.7 | 39.3 | 1.4% |
+| Daisy | adaptive_lognormal | 3.1 | 3.2 | 1.4% |
+| Riverside | adaptive_lognormal | 12.8 | 12.9 | 1.3% |
+| Castle | minor_conditional | 110.5 | 119.4 | 7.5% |
+| Great Fountain | lognormal | 45.6 | 46.4 | 1.8% |
+| Beehive | rolling_normal | 121.0 | 121.0 | 0.0% |
 
 ## Known gaps
 
 - No geyser's best model misses nominal coverage by more than 10 points at the 50% level.
 
 
-- **The covariate model did not earn its complexity.** `weibull_aft` (lifelines Weibull AFT with previous-interval, clock-time, seasonal and entry-flag covariates) ranks in the bottom half on 1 of 1 geysers: Riverside 6/6. The simple rolling lognormal/Weibull fits beat it nearly everywhere, and the dashboard-style baseline is competitive. Reported as-is.
+- **The covariate model did not earn its complexity.** `weibull_aft` (lifelines Weibull AFT with previous-interval, clock-time, seasonal and entry-flag covariates) ranks in the bottom half on 7 of 7 geysers: Old Faithful 5/8, Grand 7/7, Daisy 7/7, Riverside 6/6, Castle 8/8, Great Fountain 7/7, Beehive 6/6. The simple rolling lognormal/Weibull fits beat it nearly everywhere, and the dashboard-style baseline is competitive. Reported as-is.
 
 
 ### Honest coverage: scoring the intervals the filter throws away
@@ -43,7 +92,13 @@ Everything above is measured only on intervals that passed the validity filter, 
 
 | Geyser | n (all) | % filter-rejected | 50% cov | 90% cov | 90% cov (filtered) |
 |---|---:|---:|---:|---:|---:|
-| Riverside | 678 | 42.6% | 29.2% | 53.2% | 92.8% |
+| Old Faithful | 1,500 | 15.0% | 47.1% | 76.1% | 89.7% |
+| Grand | 1,500 | 17.9% | 38.7% | 76.1% | 91.2% |
+| Daisy | 1,500 | 21.9% | 41.1% | 69.1% | 89.1% |
+| Riverside | 1,500 | 36.5% | 36.7% | 59.0% | 92.1% |
+| Castle | 1,250 | 30.6% | 45.7% | 60.6% | 87.2% |
+| Great Fountain | 722 | 43.5% | 31.2% | 51.5% | 91.2% |
+| Beehive | 1,285 | 8.2% | 47.1% | 80.2% | 87.4% |
 
 The drop between the last two columns is the real-world penalty. Treat the headline table as an upper bound on field reliability, and see the renewal/missed-eruption handling in `predict` (README) for how the CLI compensates at prediction time.
 
