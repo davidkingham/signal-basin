@@ -305,7 +305,16 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
                 near_start, major, minor, duration_seconds,
                 LAG(epoch)            OVER w AS prev_epoch,
                 LAG(ts_utc)           OVER w AS prev_ts_utc,
-                LAG(duration_seconds) OVER w AS prev_duration_seconds
+                LAG(duration_seconds) OVER w AS prev_duration_seconds,
+                -- Anchor-eruption entry flags. A flag describes how an eruption
+                -- *was recorded*, which is only known after the fact, so models
+                -- get the previous entry's flags as a proxy for current
+                -- observing conditions (webcam-only at night, in-person in
+                -- summer) rather than the target's.
+                LAG(webcam)           OVER w AS prev_webcam,
+                LAG(electronic)       OVER w AS prev_electronic,
+                LAG(approximate)      OVER w AS prev_approximate,
+                LAG(in_eruption)      OVER w AS prev_in_eruption
             FROM singles
             WINDOW w AS (PARTITION BY geyser ORDER BY epoch)
         ),
@@ -328,9 +337,18 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
             r.prev_duration_seconds,
             r.exact, r.approximate, r.webcam, r.in_eruption, r.electronic,
             r.near_start, r.major, r.minor, r.duration_seconds,
+            COALESCE(r.prev_webcam, false)      AS prev_webcam,
+            COALESCE(r.prev_electronic, false)  AS prev_electronic,
+            COALESCE(r.prev_approximate, false) AS prev_approximate,
+            COALESCE(r.prev_in_eruption, false) AS prev_in_eruption,
             hour(r.ts_local)                            AS hour_local,
             month(r.ts_local)                           AS month_local,
             year(r.ts_local)                            AS year_local,
+            -- Anchor-time covariates. Predicting an interval means standing at
+            -- the PREVIOUS eruption, so only its clock time is knowable; using
+            -- the target eruption's own hour-of-day would leak the answer.
+            hour(timezone('America/Denver', r.prev_ts_utc))      AS prev_hour_local,
+            dayofyear(timezone('America/Denver', r.prev_ts_utc)) AS prev_doy,
             s.med_interval,
             (r.interval_min >= 0.35 * s.med_interval
              AND r.interval_min <= 3.0 * s.med_interval) AS is_valid

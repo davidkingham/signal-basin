@@ -226,11 +226,14 @@ class DurationConditionalModel:
 class WeibullAFTModel:
     """Weibull AFT (lifelines) with covariates, refit periodically.
 
-    Covariates: previous interval, hour-of-day (sin/cos), day-of-year (sin/cos),
-    and the observation-quality flags. Refitting at every eruption would be far
-    too slow across a multi-year backtest, so the model is refit every
-    `refit_every` predictions and reused in between -- which is also how you'd
-    actually deploy it.
+    Covariates: previous interval, and the clock time / day-of-year *of the
+    anchor eruption* (sin/cos), plus the observation-quality flags. The anchor
+    detail matters: the target eruption's own hour-of-day is not knowable when
+    the prediction is made, and using it leaks the answer.
+
+    Refitting at every eruption would be far too slow across a multi-year
+    backtest, so the model is refit every `refit_every` predictions and reused
+    in between -- which is also how you'd actually deploy it.
     """
 
     name = "weibull_aft"
@@ -241,10 +244,10 @@ class WeibullAFTModel:
         "hour_cos",
         "doy_sin",
         "doy_cos",
-        "webcam",
-        "electronic",
-        "approximate",
-        "in_eruption",
+        "prev_webcam",
+        "prev_electronic",
+        "prev_approximate",
+        "prev_in_eruption",
     ]
 
     def __init__(self, window: int = 1500, refit_every: int = 250) -> None:
@@ -260,13 +263,14 @@ class WeibullAFTModel:
         out["prev_interval_min"] = pd.to_numeric(
             df["prev_interval_min"], errors="coerce"
         ).astype(float)
-        hour = pd.to_numeric(df["hour_local"], errors="coerce").fillna(12).astype(float)
+        # anchor-eruption clock time, never the target's own
+        hour = pd.to_numeric(df["prev_hour_local"], errors="coerce").fillna(12).astype(float)
         out["hour_sin"] = np.sin(2 * np.pi * hour / 24.0)
         out["hour_cos"] = np.cos(2 * np.pi * hour / 24.0)
-        doy = pd.to_datetime(df["ts_local"]).dt.dayofyear.astype(float)
+        doy = pd.to_numeric(df["prev_doy"], errors="coerce").fillna(180).astype(float)
         out["doy_sin"] = np.sin(2 * np.pi * doy / 365.25)
         out["doy_cos"] = np.cos(2 * np.pi * doy / 365.25)
-        for flag in ("webcam", "electronic", "approximate", "in_eruption"):
+        for flag in ("prev_webcam", "prev_electronic", "prev_approximate", "prev_in_eruption"):
             out[flag] = df[flag].astype(float)
         return out
 

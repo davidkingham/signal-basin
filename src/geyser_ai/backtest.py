@@ -40,8 +40,9 @@ def load_intervals(geyser: str, db_path=DB_PATH) -> pd.DataFrame:
             """
             SELECT geyser, ts_utc, ts_local, epoch, interval_min, prev_interval_min,
                    prev_duration_seconds, duration_seconds, hour_local, month_local,
-                   year_local, webcam, electronic, approximate, in_eruption,
-                   near_start, exact
+                   year_local, prev_hour_local, prev_doy,
+                   prev_webcam, prev_electronic, prev_approximate, prev_in_eruption,
+                   webcam, electronic, approximate, in_eruption, near_start, exact
             FROM intervals
             WHERE geyser = ? AND is_valid
             ORDER BY epoch
@@ -57,7 +58,7 @@ def backtest_geyser(
     geyser: str,
     years: int = 3,
     min_train: int = 300,
-    max_eval: int | None = 4000,
+    max_eval: int | None = 2000,
     db_path=DB_PATH,
 ) -> tuple[list[ScoreRow], pd.DataFrame]:
     """Walk-forward over the last `years` years of eruptions for one geyser.
