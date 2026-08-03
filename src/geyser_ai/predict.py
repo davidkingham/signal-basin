@@ -13,18 +13,65 @@ from .config import DB_PATH, TARGET_GEYSERS
 from .models import default_models, observation_completeness, renewal_forecast
 
 
-def _last_eruption(geyser: str, db_path=DB_PATH) -> pd.Series | None:
+def _anchor(geyser: str, db_path=DB_PATH) -> pd.Series | None:
+    """The two most recent eruptions, from the archive AND the recent-sync table.
+
+    Predictions are only as good as their anchor, so this unions the archive
+    snapshot with anything `sync_recent` has pulled from the REST API since.
+    The second-newest row supplies the preceding interval, which several models
+    use as a covariate.
+    """
     con = duckdb.connect(str(db_path), read_only=True)
     try:
+        has_recent = con.execute(
+            "SELECT count(*) FROM duckdb_tables() WHERE table_name = 'recent_eruptions'"
+        ).fetchone()[0]
+        recent_sql = (
+            """
+            UNION ALL
+            SELECT eruption_id, geyser, epoch, ts_utc, duration_seconds,
+                   webcam, electronic, approximate, in_eruption, minor, major
+            FROM recent_eruptions WHERE geyser = ?
+            """
+            if has_recent
+            else ""
+        )
+        params = [geyser, geyser] if has_recent else [geyser]
         df = con.execute(
-            "SELECT * FROM intervals WHERE geyser=? ORDER BY epoch DESC LIMIT 1", [geyser]
+            f"""
+            WITH combined AS (
+                SELECT eruption_id, geyser, epoch, ts_utc, duration_seconds,
+                       webcam, electronic, approximate, in_eruption, minor, major
+                FROM eruptions WHERE geyser = ?
+                {recent_sql}
+            ),
+            deduped AS (SELECT DISTINCT ON (eruption_id) * FROM combined)
+            SELECT * FROM deduped ORDER BY epoch DESC LIMIT 2
+            """,
+            params,
         ).df()
     finally:
         con.close()
-    return None if df.empty else df.iloc[0]
+    if df.empty:
+        return None
+    last = df.iloc[0].copy()
+    # Preceding interval, when we have a second-newest eruption to measure from.
+    if len(df) > 1:
+        prev_gap = (int(last["epoch"]) - int(df.iloc[1]["epoch"])) / 60.0
+        last["interval_min"] = prev_gap if prev_gap > 0 else np.nan
+    else:
+        last["interval_min"] = np.nan
+    ts = pd.to_datetime(last["ts_utc"], utc=True)
+    last["ts_local"] = ts.tz_convert("America/Denver")
+    return last
 
 
-def predict_geyser(geyser: str, model_name: str | None = None, db_path=DB_PATH) -> dict | None:
+def predict_geyser(
+    geyser: str,
+    model_name: str | None = None,
+    db_path=DB_PATH,
+    include_dist: bool = False,
+) -> dict | None:
     """Predict the next interval for `geyser` from its most recent eruption.
 
     The whole valid history is the training set and the last recorded eruption is
@@ -35,16 +82,24 @@ def predict_geyser(geyser: str, model_name: str | None = None, db_path=DB_PATH) 
     hist = load_intervals(geyser, db_path)
     if len(hist) < 50:
         return None
-    last = _last_eruption(geyser, db_path)
+    last = _anchor(geyser, db_path)
     if last is None:
         return None
+
+    # Fall back to the geyser's own median when the anchor has no measurable
+    # preceding interval (single eruption, or a gap we could not measure).
+    prev_int = last.get("interval_min")
+    if prev_int is None or not np.isfinite(prev_int):
+        prev_int = float(hist["interval_min"].tail(200).median())
 
     # The "row" being predicted is the *next* eruption: its previous interval and
     # previous duration come from the last observed eruption.
     row = pd.Series(
         {
-            "prev_interval_min": float(last["interval_min"]),
+            "prev_interval_min": float(prev_int),
             "prev_duration_seconds": last.get("duration_seconds"),
+            "prev_minor": bool(last.get("minor", False)),
+            "prev_major": bool(last.get("major", False)),
             # anchor covariates come from the last observed eruption
             "prev_hour_local": int(pd.to_datetime(last["ts_local"]).hour),
             "prev_doy": int(pd.to_datetime(last["ts_local"]).dayofyear),
@@ -93,7 +148,7 @@ def predict_geyser(geyser: str, model_name: str | None = None, db_path=DB_PATH) 
 
     # Flag the regime so the caller knows which answer they are looking at.
     stale = exp_missed >= 0.5
-    return {
+    result = {
         "geyser": geyser,
         "model": chosen,
         "last_eruption_utc": last_ts.isoformat(),
@@ -116,6 +171,10 @@ def predict_geyser(geyser: str, model_name: str | None = None, db_path=DB_PATH) 
         "naive_interval_50_min": [round(naive50[0], 1), round(naive50[1], 1)],
         "naive_interval_90_min": [round(naive90[0], 1), round(naive90[1], 1)],
     }
+    if include_dist:
+        # Non-serialisable; callers that ask for it must pop it before JSON.
+        result["_prediction"] = rpred
+    return result
 
 
 def predict_all(geysers: list[str] | None = None, model_name: str | None = None,
