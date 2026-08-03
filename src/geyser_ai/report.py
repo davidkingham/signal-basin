@@ -272,6 +272,54 @@ def write_report(
             f"| {_fmt(base.crps, 1) if base else 'n/a'} | {imp} |"
         )
 
+    # Data-driven honesty section: call out where the winner is still miscalibrated,
+    # and whether the covariate model actually earned its complexity.
+    lines.append("\n## Known gaps\n")
+    gaps: list[str] = []
+    for g in geysers:
+        rows = sorted([s for s in scores if s.geyser == g], key=lambda r: r.crps)
+        if not rows:
+            continue
+        b = rows[0]
+        if abs(b.cover50 - 0.50) > 0.10:
+            direction = "far too wide" if b.cover50 > 0.50 else "overconfident"
+            gaps.append(
+                f"- **{g}** — the best model (`{b.model}`) is {direction}: its nominal 50% "
+                f"interval actually covers {b.cover50:.0%}. The predicted distribution is "
+                "the wrong *shape*, not just the wrong width."
+            )
+        if abs(b.cover90 - 0.90) > 0.07:
+            gaps.append(
+                f"- **{g}** — nominal 90% coverage is {b.cover90:.0%} for `{b.model}`."
+            )
+    lines.extend(gaps or ["- No geyser's best model misses nominal coverage by more than "
+                          "10 points at the 50% level.\n"])
+
+    aft_ranks = []
+    for g in geysers:
+        rows = sorted([s for s in scores if s.geyser == g], key=lambda r: r.crps)
+        names = [r.model for r in rows]
+        if "weibull_aft" in names:
+            aft_ranks.append((g, names.index("weibull_aft") + 1, len(names)))
+    if aft_ranks:
+        worst = sum(1 for _, r, n in aft_ranks if r > n / 2)
+        lines.append(
+            f"\n- **The covariate model did not earn its complexity.** `weibull_aft` "
+            f"(lifelines Weibull AFT with previous-interval, clock-time, seasonal and "
+            f"entry-flag covariates) ranks in the bottom half on {worst} of "
+            f"{len(aft_ranks)} geysers: "
+            + ", ".join(f"{g} {r}/{n}" for g, r, n in aft_ranks)
+            + ". The simple rolling lognormal/Weibull fits beat it nearly everywhere, "
+            "and the dashboard-style baseline is competitive. Reported as-is.\n"
+        )
+
+    lines.append(
+        "\n- **Coverage here is measured only on intervals that passed the validity "
+        "filter.** In the field a model also has to survive the case where an eruption "
+        "was simply never logged, which these numbers do not capture. Treat them as an "
+        "upper bound on real-world reliability.\n"
+    )
+
     lines.append("\n## Figures\n")
     for f in figs:
         lines.append(f"![{f}](figures/{f})\n")
@@ -288,6 +336,15 @@ def write_report(
         "per-geyser plausibility filter (0.35x-3x that geyser's median). The rest are "
         "overwhelmingly observation gaps — nobody is watching Riverside at 3am in "
         "February — not real eruptions.\n"
+    )
+    lines.append(
+        "- The ceiling is **1.75x** the median rather than the more obvious 3x because "
+        "the interval histograms show clear **harmonics**: Riverside clusters at ~390, "
+        "~780 and ~1150 minutes, Great Fountain at ~686 and ~1400. Those secondary peaks "
+        "sit at exactly 2x and 3x the median and are one and two missed eruptions. A 3x "
+        "ceiling admits them, and models trained on the contaminated series predict "
+        "distributions far wider than reality — it was worth several times more CRPS "
+        "than any modeling choice in this report.\n"
     )
     flags = con.execute(
         """

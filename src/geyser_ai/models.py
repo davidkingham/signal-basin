@@ -314,7 +314,6 @@ class WeibullAFTModel:
         if Xrow.isna().any().any():
             return None
         try:
-            lam, rho = self._fitter.predict_percentile, None  # noqa: F841
             params = self._fitter.params_
             # WeibullAFT: lambda_ = exp(X @ beta), rho_ = exp(intercept)
             lam_lp = float(

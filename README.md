@@ -81,7 +81,57 @@ empirical coverage of the nominal 50% and 90% intervals.
 
 Full table and figures: [`reports/calibration_report.md`](reports/calibration_report.md).
 
-<!-- RESULTS_SUMMARY -->
+Best CRPS per geyser (minutes; lower is better), walk-forward over the last 3 years:
+
+| Geyser | Best model | CRPS | MAE | 50% cov | 90% cov | vs. baseline |
+|---|---|---:|---:|---:|---:|---:|
+| Old Faithful | `duration_lognormal` | 8.1 | 11.5 | 53% | 89% | −8.4% |
+| Grand | `lognormal` | 41.8 | 57.6 | 52% | 92% | −1.9% |
+| Daisy | `lognormal` | 12.9 | 14.9 | 87% | 92% | −8.9% |
+| Riverside | `best_parametric` | 14.3 | 18.3 | 54% | 91% | −0.8% |
+| Castle | `weibull` | 104.1 | 125.9 | 70% | 83% | −1.6% |
+| Great Fountain | `lognormal` | 47.8 | 65.5 | 57% | 92% | −3.0% |
+| Beehive | `rolling_normal` | 131.1 | 181.6 | 53% | 88% | 0.0% |
+
+Three findings worth stating plainly:
+
+**1. Data cleaning mattered far more than modeling.** The first run used a 3×-median
+ceiling for interval validity. The interval histograms then showed unmistakable
+harmonics — Riverside clusters at ~390, ~780 and ~1150 minutes, Great Fountain at
+~686 and ~1400 — which are one and two *missed* eruptions, not real intervals.
+Tightening the ceiling to 1.75× cut CRPS by far more than any model ever did:
+
+| Geyser | Best CRPS @ 3× | Best CRPS @ 1.75× | Change |
+|---|---:|---:|---:|
+| Old Faithful | 10.1 | 8.1 | −20% |
+| Grand | 105.3 | 41.8 | −60% |
+| Daisy | 22.3 | 12.9 | −42% |
+| Riverside | 106.6 | 14.3 | **−87%** |
+| Castle | 245.2 | 104.1 | −58% |
+| Great Fountain | 194.7 | 47.8 | −75% |
+| Beehive | 178.8 | 131.1 | −27% |
+
+**2. The lifelines covariate model did not earn its complexity — reported honestly.**
+`weibull_aft` ranks in the *bottom half* on all seven geysers. On dirty data it
+looked like the clear winner on Riverside (CRPS 106.6 vs 120.8 for the next model);
+that entire advantage was an artifact — it was using the previous interval to
+detect "the last gap was a double, so this one might be too." Once the harmonics
+were removed the signal vanished and the simple rolling lognormal/Weibull fits beat
+it nearly everywhere. The dashboard-style baseline is competitive too, and actually
+*wins* on Beehive.
+
+**3. The one covariate that genuinely helps is Old Faithful's eruption duration.**
+`duration_lognormal`, which splits on whether the preceding eruption was shorter or
+longer than ~2.5 minutes, is the best model for Old Faithful (CRPS 8.06 vs 8.56 for
+the next best). The classic short/long duration → interval relationship still holds
+in current data.
+
+**Remaining calibration gap:** Daisy's nominal 50% interval covers 87% of actuals.
+Daisy is extremely regular, and a rolling window wide enough to fit stably spans
+level shifts, so the fitted marginal is much wider than the local conditional. A
+shorter window or a changepoint-aware model is the obvious next step. Castle is also
+off (70% at nominal 50%), most likely because its major/minor eruption distinction
+is not modeled — 23% of Castle entries are flagged `minor`.
 
 ## Data attribution and gentle use
 

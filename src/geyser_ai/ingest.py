@@ -26,8 +26,6 @@ from .config import (
     USER_AGENT,
 )
 
-# Raw archive column order, straight from the TSV header. Kept verbatim so the
-# `eruptions_raw` table is a faithful mirror of what GeyserTimes published.
 # Interval plausibility bounds, as multiples of each geyser's own median.
 #
 # These were tightened from an initial 0.35x-3.0x after the interval histograms
@@ -43,34 +41,6 @@ from .config import (
 # `interval_min`, and `is_valid` is just a flag, so this is easy to revisit.
 INTERVAL_MIN_MULT = 0.5
 INTERVAL_MAX_MULT = 1.75
-
-RAW_COLUMNS: tuple[str, ...] = (
-    "eruptionID",
-    "geyser",
-    "eruption_time_epoch",
-    "has_seconds",
-    "exact",
-    "ns",
-    "ie",
-    "E",
-    "A",
-    "wc",
-    "ini",
-    "maj",
-    "min",
-    "q",
-    "duration",
-    "duration_seconds",
-    "duration_resolution",
-    "duration_modifier",
-    "entrant",
-    "observer",
-    "eruption_comment",
-    "time_updated",
-    "time_entered",
-    "associated_primaryID",
-    "other_comments",
-)
 
 
 def _archive_url(version: str) -> str:
