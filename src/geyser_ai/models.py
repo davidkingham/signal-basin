@@ -223,6 +223,151 @@ class DurationConditionalModel:
         return Prediction(dist, self.name) if dist is not None else None
 
 
+def _last_changepoint(x: np.ndarray, min_seg: int = 40, penalty: float = 8.0) -> int:
+    """Index of the most recent level shift in `x`, or 0 if none is credible.
+
+    A single-changepoint scan on the mean, scored by the drop in within-segment
+    sum-of-squares and accepted only when the drop beats a BIC-style penalty.
+    We only care about the *most recent* shift because everything before it is
+    the stale regime we want to discard.
+    """
+    n = len(x)
+    if n < 2 * min_seg:
+        return 0
+    # Search only the recent portion; an ancient changepoint is not actionable.
+    lo, hi = max(min_seg, n - 600), n - min_seg
+    if hi <= lo:
+        return 0
+    total_ss = float(np.sum((x - x.mean()) ** 2))
+    if total_ss <= 0:
+        return 0
+    csum = np.concatenate([[0.0], np.cumsum(x)])
+    csq = np.concatenate([[0.0], np.cumsum(x**2)])
+
+    def seg_ss(a: int, b: int) -> float:
+        m = b - a
+        s = csum[b] - csum[a]
+        return float(csq[b] - csq[a] - s * s / m)
+
+    idxs = np.arange(lo, hi)
+    ss = np.array([seg_ss(0, k) + seg_ss(k, n) for k in idxs])
+    best = int(idxs[int(np.argmin(ss))])
+    # Accept only a materially better two-segment fit.
+    if total_ss - ss.min() < penalty * total_ss / n * np.log(n):
+        return 0
+    return best
+
+
+class AdaptiveLogNormalModel:
+    """Lognormal on an adaptively-chosen recent window.
+
+    Motivation: for a very regular geyser (Daisy) a window long enough to fit
+    stably also spans level shifts, so the fitted *marginal* is much wider than
+    the local *conditional* -- which is exactly the over-coverage we measured
+    (a nominal 50% interval covering 87%).
+
+    Two mechanisms, both using only past data:
+      * cut the window at the most recent detected changepoint, and
+      * among a set of candidate window lengths, pick the one with the best
+        held-out log-likelihood on the most recent observations.
+    """
+
+    name = "adaptive_lognormal"
+
+    def __init__(
+        self,
+        candidates: tuple[int, ...] = (25, 50, 100, 200),
+        holdout: int = 25,
+        use_changepoint: bool = True,
+    ) -> None:
+        self.candidates = candidates
+        self.holdout = holdout
+        self.use_changepoint = use_changepoint
+
+    @staticmethod
+    def _fit(x: np.ndarray) -> tuple[float, float] | None:
+        x = x[x > 0]
+        if len(x) < 10:
+            return None
+        logs = np.log(x)
+        return float(np.mean(logs)), max(float(np.std(logs, ddof=1)), _MIN_SCALE)
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        x = history["interval_min"].to_numpy(dtype=float)
+        x = x[np.isfinite(x) & (x > 0)]
+        if len(x) < 60:
+            return None
+
+        if self.use_changepoint:
+            cp = _last_changepoint(x[-800:])
+            if cp > 0:
+                seg = x[-800:][cp:]
+                if len(seg) >= 40:
+                    x = seg
+
+        # choose the window length by held-out likelihood on the most recent block
+        best_w, best_ll = None, -np.inf
+        if len(x) > self.holdout + 20:
+            tr_all, ho = x[: -self.holdout], x[-self.holdout :]
+            for w in self.candidates:
+                if len(tr_all) < max(w, 12):
+                    continue
+                fit = self._fit(tr_all[-w:])
+                if fit is None:
+                    continue
+                mu, sd = fit
+                ll = float(np.sum(stats.lognorm.logpdf(ho, s=sd, scale=np.exp(mu))))
+                if np.isfinite(ll) and ll > best_ll:
+                    best_w, best_ll = w, ll
+        w = best_w or min(self.candidates[-1], len(x))
+        fit = self._fit(x[-w:])
+        if fit is None:
+            return None
+        mu, sd = fit
+        return Prediction(stats.lognorm(s=sd, scale=np.exp(mu)), self.name)
+
+
+class MinorConditionalModel:
+    """Condition the next interval on whether the PREVIOUS eruption was a minor.
+
+    Castle erupts in two modes: a full major that discharges the system, and a
+    minor that does not. The interval following a minor is physically a
+    different quantity, and pooling the two inflates the predicted spread. This
+    fits a separate lognormal to the post-minor and post-major subsets of the
+    rolling window and selects by the anchor eruption's `prev_minor` flag,
+    falling back to the pooled fit when a subset is too thin.
+    """
+
+    name = "minor_conditional"
+
+    def __init__(self, window: int = 400) -> None:
+        self.window = window
+
+    @staticmethod
+    def _lognorm_from(x: np.ndarray, min_n: int = 25) -> stats.rv_continuous | None:
+        x = x[np.isfinite(x) & (x > 0)]
+        if len(x) < min_n:
+            return None
+        logs = np.log(x)
+        sd = max(float(np.std(logs, ddof=1)), _MIN_SCALE)
+        return stats.lognorm(s=sd, scale=np.exp(float(np.mean(logs))))
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        h = history.tail(self.window)
+        if len(h) < 60:
+            return None
+        v = h["interval_min"].to_numpy(dtype=float)
+        pooled = self._lognorm_from(v)
+        if "prev_minor" not in h.columns:
+            return Prediction(pooled, self.name) if pooled is not None else None
+
+        was_minor = bool(row.get("prev_minor", False))
+        flag = h["prev_minor"].astype(bool).to_numpy()
+        sub = v[flag] if was_minor else v[~flag]
+        dist = self._lognorm_from(sub) or pooled
+        return Prediction(dist, self.name) if dist is not None else None
+
+
 class WeibullAFTModel:
     """Weibull AFT (lifelines) with covariates, refit periodically.
 
@@ -330,15 +475,24 @@ class WeibullAFTModel:
         return Prediction(stats.weibull_min(c=shape, loc=0, scale=scale), self.name)
 
 
+# Geysers with a meaningful minor-eruption mode. Elsewhere the flag is unused
+# (Daisy, Grand, Riverside, Beehive and Great Fountain are ~0% minor), so the
+# conditional model would just be a slower copy of `lognormal`.
+MINOR_MODE_GEYSERS = frozenset({"Castle", "Old Faithful"})
+
+
 def default_models(geyser: str) -> list[Model]:
-    """Model roster. Old Faithful additionally gets the duration-conditional model."""
+    """Model roster. Some models are only added where the physics warrants it."""
     models: list[Model] = [
         RollingMeanModel(window=30),
         LogNormalModel(window=100),
         WeibullModel(window=100),
         BestParametricModel(window=150),
+        AdaptiveLogNormalModel(),
         WeibullAFTModel(window=1500, refit_every=250),
     ]
     if geyser == "Old Faithful":
         models.append(DurationConditionalModel(window=400))
+    if geyser in MINOR_MODE_GEYSERS:
+        models.append(MinorConditionalModel(window=400))
     return models

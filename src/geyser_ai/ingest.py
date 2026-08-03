@@ -39,6 +39,10 @@ from .config import (
 # intervals; 0.5x removes duplicate entries and sub-harmonics. Both bounds are
 # deliberately crude and per-geyser -- the raw interval is always retained in
 # `interval_min`, and `is_valid` is just a flag, so this is easy to revisit.
+#
+# The median these multiply is LOCAL (a centered rolling median over ~300
+# neighbouring eruptions), not global. See the `local_med` CTE below for why
+# that distinction turned out to matter more than the multipliers themselves.
 INTERVAL_MIN_MULT = 0.5
 INTERVAL_MAX_MULT = 1.75
 
@@ -304,7 +308,13 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
                 LAG(webcam)           OVER w AS prev_webcam,
                 LAG(electronic)       OVER w AS prev_electronic,
                 LAG(approximate)      OVER w AS prev_approximate,
-                LAG(in_eruption)      OVER w AS prev_in_eruption
+                LAG(in_eruption)      OVER w AS prev_in_eruption,
+                -- Castle (and to a lesser extent Old Faithful) has genuine
+                -- MINOR eruptions that do not fully discharge the system, so
+                -- the interval that FOLLOWS a minor is physically different.
+                -- This is a real state variable, not an entry artifact.
+                LAG(minor)            OVER w AS prev_minor,
+                LAG(major)            OVER w AS prev_major
             FROM singles
             WINDOW w AS (PARTITION BY geyser ORDER BY epoch)
         ),
@@ -313,11 +323,27 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
             FROM seq
             WHERE prev_epoch IS NOT NULL
         ),
-        stats AS (
-            SELECT geyser, median(interval_min) AS med_interval
+        -- LOCAL median, not a global one. Geyser intervals drift over decades:
+        -- Daisy ran a 142-minute median in 2019 and 111 in 2026. A single median
+        -- across the whole 1871-present record sets the ceiling by the OLD era,
+        -- so doubles of the MODERN interval (~222 min) slid under 1.75 x 142 =
+        -- 248 and survived as a phantom second mode -- which is exactly the
+        -- over-dispersion that wrecked Daisy's calibration.
+        --
+        -- The window is centered, so this uses neighbouring eruptions on both
+        -- sides. That is deliberate: identifying corrupt records is a
+        -- preprocessing step, not a prediction, and a centered median tracks a
+        -- drifting baseline far better than a trailing one. The quantity is
+        -- smooth and slowly-varying, so it carries no meaningful information
+        -- about any individual interval.
+        local_med AS (
+            SELECT *,
+                   median(interval_min) OVER (
+                       PARTITION BY geyser ORDER BY epoch
+                       ROWS BETWEEN 150 PRECEDING AND 150 FOLLOWING
+                   ) AS med_interval
             FROM raw_int
             WHERE interval_min > 0
-            GROUP BY geyser
         )
         SELECT
             r.eruption_id, r.geyser, r.ts_utc, r.ts_local, r.epoch,
@@ -331,6 +357,8 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
             COALESCE(r.prev_electronic, false)  AS prev_electronic,
             COALESCE(r.prev_approximate, false) AS prev_approximate,
             COALESCE(r.prev_in_eruption, false) AS prev_in_eruption,
+            COALESCE(r.prev_minor, false)       AS prev_minor,
+            COALESCE(r.prev_major, false)       AS prev_major,
             hour(r.ts_local)                            AS hour_local,
             month(r.ts_local)                           AS month_local,
             year(r.ts_local)                            AS year_local,
@@ -339,11 +367,10 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
             -- the target eruption's own hour-of-day would leak the answer.
             hour(timezone('America/Denver', r.prev_ts_utc))      AS prev_hour_local,
             dayofyear(timezone('America/Denver', r.prev_ts_utc)) AS prev_doy,
-            s.med_interval,
-            (r.interval_min >= {INTERVAL_MIN_MULT} * s.med_interval
-             AND r.interval_min <= {INTERVAL_MAX_MULT} * s.med_interval) AS is_valid
-        FROM raw_int r
-        JOIN stats s USING (geyser)
+            r.med_interval,
+            (r.interval_min >= {INTERVAL_MIN_MULT} * r.med_interval
+             AND r.interval_min <= {INTERVAL_MAX_MULT} * r.med_interval) AS is_valid
+        FROM local_med r
         ORDER BY r.geyser, r.epoch
         """
     )

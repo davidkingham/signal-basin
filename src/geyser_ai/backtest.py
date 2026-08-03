@@ -42,6 +42,7 @@ def load_intervals(geyser: str, db_path=DB_PATH) -> pd.DataFrame:
                    prev_duration_seconds, duration_seconds, hour_local, month_local,
                    year_local, prev_hour_local, prev_doy,
                    prev_webcam, prev_electronic, prev_approximate, prev_in_eruption,
+                   prev_minor, prev_major, minor, major,
                    webcam, electronic, approximate, in_eruption, near_start, exact
             FROM intervals
             WHERE geyser = ? AND is_valid
