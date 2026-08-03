@@ -69,10 +69,9 @@ def plot_interval_histograms(geysers: list[str], db_path=DB_PATH) -> str:
     nrow = int(np.ceil(n / ncol))
     fig, axes = plt.subplots(nrow, ncol, figsize=(11, 2.6 * nrow))
     axes = np.atleast_1d(axes).ravel()
-    for ax, g in zip(axes, geysers):
+    for ax, g in zip(axes, geysers, strict=False):
         df = con.execute(
-            "SELECT interval_min FROM intervals WHERE geyser=? AND is_valid "
-            "AND year_local >= 2015",
+            "SELECT interval_min FROM intervals WHERE geyser=? AND is_valid AND year_local >= 2015",
             [g],
         ).df()
         if df.empty:
@@ -118,7 +117,7 @@ def plot_reliability(recs: pd.DataFrame, geysers: list[str]) -> str:
     fig, axes = plt.subplots(nrow, ncol, figsize=(11, 3.0 * nrow))
     axes = np.atleast_1d(axes).ravel()
     levels = np.linspace(0, 1, 101)
-    for ax, g in zip(axes, present):
+    for ax, g in zip(axes, present, strict=False):
         sub = recs[recs["geyser"] == g]
         ax.plot([0, 1], [0, 1], color=MUTED, lw=1, ls="--", zorder=1)
         for m in MODEL_ORDER:
@@ -140,7 +139,7 @@ def plot_reliability(recs: pd.DataFrame, geysers: list[str]) -> str:
     # first panel -- some models only apply to certain geysers.
     seen: dict[str, object] = {}
     for ax in axes:
-        for h, lab in zip(*ax.get_legend_handles_labels()):
+        for h, lab in zip(*ax.get_legend_handles_labels(), strict=True):
             seen.setdefault(lab, h)
     ordered = [m for m in MODEL_ORDER if m in seen]
     fig.legend(
@@ -315,11 +314,14 @@ def write_report(
                 "the wrong *shape*, not just the wrong width."
             )
         if abs(b.cover90 - 0.90) > 0.07:
-            gaps.append(
-                f"- **{g}** — nominal 90% coverage is {b.cover90:.0%} for `{b.model}`."
-            )
-    lines.extend(gaps or ["- No geyser's best model misses nominal coverage by more than "
-                          "10 points at the 50% level.\n"])
+            gaps.append(f"- **{g}** — nominal 90% coverage is {b.cover90:.0%} for `{b.model}`.")
+    lines.extend(
+        gaps
+        or [
+            "- No geyser's best model misses nominal coverage by more than "
+            "10 points at the 50% level.\n"
+        ]
+    )
 
     aft_ranks = []
     for g in geysers:
@@ -339,9 +341,7 @@ def write_report(
             "and the dashboard-style baseline is competitive. Reported as-is.\n"
         )
 
-    lines.append(
-        "\n### Honest coverage: scoring the intervals the filter throws away\n"
-    )
+    lines.append("\n### Honest coverage: scoring the intervals the filter throws away\n")
     lines.append(
         "Everything above is measured only on intervals that passed the validity "
         "filter, which quietly excludes exactly the cases the filter exists to remove — "
@@ -363,8 +363,9 @@ def write_report(
         lines.append(
             f"| {g} | {hc['n']:,} | {hc['pct_filtered_out']:.1f}% "
             f"| {hc['cover50']:.1%} | {hc['cover90']:.1%} "
-            f"| {ln.cover90:.1%} |" if ln else
-            f"| {g} | {hc['n']:,} | {hc['pct_filtered_out']:.1f}% "
+            f"| {ln.cover90:.1%} |"
+            if ln
+            else f"| {g} | {hc['n']:,} | {hc['pct_filtered_out']:.1f}% "
             f"| {hc['cover50']:.1%} | {hc['cover90']:.1%} | n/a |"
         )
     lines.append(
@@ -467,8 +468,10 @@ def write_report(
             f"| {r['geyser']} | {r['pct_webcam']}% | {r['pct_electronic']}% "
             f"| {r['pct_approx']}% | {r['pct_in_eye']}% |"
         )
-    lines.append("\nData courtesy of [GeyserTimes.org](https://geysertimes.org) and its "
-                 "community of volunteer observers.\n")
+    lines.append(
+        "\nData courtesy of [GeyserTimes.org](https://geysertimes.org) and its "
+        "community of volunteer observers.\n"
+    )
 
     path = REPORTS_DIR / "calibration_report.md"
     path.write_text("\n".join(lines))

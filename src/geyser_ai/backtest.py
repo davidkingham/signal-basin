@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from .config import DB_PATH, TARGET_GEYSERS
-from .models import LogNormalModel, Model, default_models
+from .models import LogNormalModel, default_models
 
 
 @dataclass

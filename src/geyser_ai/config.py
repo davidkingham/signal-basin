@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = Path(os.environ.get("GEYSER_AI_DATA_DIR", PROJECT_ROOT / "data"))
 RAW_DIR = DATA_DIR / "raw"
-DB_PATH = DATA_DIR / "geysertimes.duckdb"
+# Overridable so tests can point at a synthetic database and the deployed
+# container can point at the snapshot it pulls from object storage. Read at
+# import time, which is why the test suite sets it before importing the package.
+DB_PATH = Path(os.environ.get("GEYSER_AI_DB", DATA_DIR / "geysertimes.duckdb"))
 REPORTS_DIR = PROJECT_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
 

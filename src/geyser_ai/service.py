@@ -55,7 +55,7 @@ def _density_curve(
         dens = dens / peak
     return [
         {"t": ts.tz_convert(PARK_TZ).isoformat(), "d": round(float(v), 5)}
-        for ts, v in zip(grid, dens)
+        for ts, v in zip(grid, dens, strict=True)
     ]
 
 
@@ -71,7 +71,7 @@ def _nowcast_override(geyser: str, hours: float, n_points: int, db_path) -> dict
 
     if geyser not in NEIGHBORS:
         return None
-    now = int(dt.datetime.now(dt.timezone.utc).timestamp())
+    now = int(dt.datetime.now(dt.UTC).timestamp())
     try:
         own = load_eruption_epochs(geyser, db_path)
         iv = load_valid_intervals(geyser, db_path)
@@ -80,7 +80,10 @@ def _nowcast_override(geyser: str, hours: float, n_points: int, db_path) -> dict
         return None
     if len(own) < 100 or len(iv) < 100:
         return None
-    res = nowcast(geyser, now, own, iv[:, 1].astype(float), neigh, n_sims=8000)
+    from .observation import observation_completeness_at
+
+    p_obs, _ = observation_completeness_at(geyser, now, db_path=db_path)
+    res = nowcast(geyser, now, own, iv[:, 1].astype(float), neigh, p_obs=p_obs, n_sims=8000)
     if res is None or res.regime == "base":
         return None
 
@@ -100,8 +103,8 @@ def _nowcast_override(geyser: str, hours: float, n_points: int, db_path) -> dict
         dens = dens / peak
 
     def at(m: float) -> str:
-        return (t0 + pd.Timedelta(minutes=float(m))).tz_convert(PARK_TZ).strftime(
-            "%Y-%m-%d %H:%M %Z"
+        return (
+            (t0 + pd.Timedelta(minutes=float(m))).tz_convert(PARK_TZ).strftime("%Y-%m-%d %H:%M %Z")
         )
 
     return {
@@ -114,14 +117,18 @@ def _nowcast_override(geyser: str, hours: float, n_points: int, db_path) -> dict
         "window_50_local": [at(lo50), at(hi50)],
         "window_90_local": [at(lo90), at(hi90)],
         "predicted_utc": (t0 + pd.Timedelta(minutes=med)).isoformat(),
-        "window_50_utc": [(t0 + pd.Timedelta(minutes=lo50)).isoformat(),
-                          (t0 + pd.Timedelta(minutes=hi50)).isoformat()],
-        "window_90_utc": [(t0 + pd.Timedelta(minutes=lo90)).isoformat(),
-                          (t0 + pd.Timedelta(minutes=hi90)).isoformat()],
+        "window_50_utc": [
+            (t0 + pd.Timedelta(minutes=lo50)).isoformat(),
+            (t0 + pd.Timedelta(minutes=hi50)).isoformat(),
+        ],
+        "window_90_utc": [
+            (t0 + pd.Timedelta(minutes=lo90)).isoformat(),
+            (t0 + pd.Timedelta(minutes=hi90)).isoformat(),
+        ],
         "minutes_until": round(med, 1),
         "density": [
             {"t": ts.tz_convert(PARK_TZ).isoformat(), "d": round(float(v), 5)}
-            for ts, v in zip(grid, dens)
+            for ts, v in zip(grid, dens, strict=True)
         ],
     }
 
@@ -153,9 +160,7 @@ def get_predictions(
         pred_obj = r.pop("_prediction", None)
         if pred_obj is not None:
             r["density"] = _density_curve(pred_obj, anchor, hours, density_points)
-        r["predicted_utc"] = (
-            anchor + pd.Timedelta(minutes=r["median_interval_min"])
-        ).isoformat()
+        r["predicted_utc"] = (anchor + pd.Timedelta(minutes=r["median_interval_min"])).isoformat()
         r["window_50_utc"] = [
             (anchor + pd.Timedelta(minutes=m)).isoformat() for m in r["interval_50_min"]
         ]
@@ -196,7 +201,7 @@ def _sync_summary() -> dict[str, Any]:
     last = s.get("last_success")
     return {
         "last_success_utc": (
-            dt.datetime.fromtimestamp(last, tz=dt.timezone.utc).isoformat() if last else None
+            dt.datetime.fromtimestamp(last, tz=dt.UTC).isoformat() if last else None
         ),
         "entries_last_sync": s.get("n_last", 0),
         "entries_total": s.get("n_total", 0),
@@ -211,7 +216,7 @@ def get_recent_eruptions(
     """Eruptions logged in the last `hours`, archive and recent sync combined."""
     if do_sync:
         sync_recent(db_path=db_path)
-    cutoff = int((dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)).timestamp())
+    cutoff = int((dt.datetime.now(dt.UTC) - dt.timedelta(hours=hours)).timestamp())
 
     con = duckdb.connect(str(db_path), read_only=True)
     try:
@@ -259,13 +264,9 @@ def get_recent_eruptions(
                 "time_utc": ts.isoformat(),
                 "time_local": ts.tz_convert(PARK_TZ).strftime("%H:%M"),
                 "date_local": ts.tz_convert(PARK_TZ).strftime("%Y-%m-%d"),
-                "minutes_ago": round(
-                    (pd.Timestamp.now(tz="UTC") - ts).total_seconds() / 60.0
-                ),
+                "minutes_ago": round((pd.Timestamp.now(tz="UTC") - ts).total_seconds() / 60.0),
                 "duration_seconds": (
-                    float(r["duration_seconds"])
-                    if pd.notna(r["duration_seconds"])
-                    else None
+                    float(r["duration_seconds"]) if pd.notna(r["duration_seconds"]) else None
                 ),
                 "webcam": bool(r["webcam"]),
                 "electronic": bool(r["electronic"]),
@@ -353,7 +354,7 @@ def get_health(db_path=DB_PATH) -> dict[str, Any]:
         con.close()
 
     latest = max([e for e in (newest, newest_recent) if e is not None], default=None)
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     age_h = (now.timestamp() - latest) / 3600.0 if latest else None
     return {
         "status": "ok",
@@ -361,15 +362,11 @@ def get_health(db_path=DB_PATH) -> dict[str, Any]:
         "park_time": pd.Timestamp.now(tz=PARK_TZ).strftime("%Y-%m-%d %H:%M %Z"),
         "archive_rows": int(n_raw),
         "archive_newest_utc": (
-            dt.datetime.fromtimestamp(newest, tz=dt.timezone.utc).isoformat()
-            if newest
-            else None
+            dt.datetime.fromtimestamp(newest, tz=dt.UTC).isoformat() if newest else None
         ),
         "recent_sync_rows": int(n_recent),
         "newest_eruption_utc": (
-            dt.datetime.fromtimestamp(latest, tz=dt.timezone.utc).isoformat()
-            if latest
-            else None
+            dt.datetime.fromtimestamp(latest, tz=dt.UTC).isoformat() if latest else None
         ),
         "data_age_hours": round(age_h, 2) if age_h is not None else None,
         "sync": _sync_summary(),

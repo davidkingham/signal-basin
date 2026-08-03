@@ -503,9 +503,9 @@ class WeibullAFTModel:
     @staticmethod
     def _design(df: pd.DataFrame) -> pd.DataFrame:
         out = pd.DataFrame(index=df.index)
-        out["prev_interval_min"] = pd.to_numeric(
-            df["prev_interval_min"], errors="coerce"
-        ).astype(float)
+        out["prev_interval_min"] = pd.to_numeric(df["prev_interval_min"], errors="coerce").astype(
+            float
+        )
         # anchor-eruption clock time, never the target's own
         hour = pd.to_numeric(df["prev_hour_local"], errors="coerce").fillna(12).astype(float)
         out["hour_sin"] = np.sin(2 * np.pi * hour / 24.0)
@@ -583,6 +583,79 @@ MINOR_MODE_GEYSERS = frozenset({"Castle", "Old Faithful"})
 LOGGER_HEAVY_GEYSERS = frozenset({"Great Fountain", "Daisy", "Castle", "Grand"})
 
 
+class TailMixture:
+    """A fitted distribution widened by a heavier-tailed second component.
+
+    A rolling-window fit on a geyser in a settled regime can be extremely sharp
+    -- Daisy's last hundred intervals give a standard deviation of about four
+    minutes. Taken literally that makes running fifteen minutes late a 3.7-sigma
+    event, and the renewal forecast then prefers *any* explanation involving a
+    missed eruption, jumping a whole cycle forward while observers are standing
+    there watching the geyser not erupt.
+
+    The window fit is a statement about the current regime, and the honest
+    predictive distribution has to allow that the regime may not hold. Mixing in
+    a wider component fitted over a much longer history does exactly that: the
+    centre is unchanged, and being late becomes surprising rather than
+    impossible.
+    """
+
+    def __init__(self, narrow, wide, w_wide: float = 0.15) -> None:
+        self.narrow, self.wide = narrow, wide
+        self.w = float(np.clip(w_wide, 0.0, 1.0))
+
+    def rvs(self, size, random_state=None):
+        rng = (
+            random_state if hasattr(random_state, "random") else np.random.default_rng(random_state)
+        )
+        n = int(np.prod(size)) if isinstance(size, tuple) else int(size)
+        pick = rng.random(n) < self.w
+        out = np.where(
+            pick, self.wide.rvs(n, random_state=rng), self.narrow.rvs(n, random_state=rng)
+        )
+        return out.reshape(size) if isinstance(size, tuple) else out
+
+    def cdf(self, x):
+        return (1 - self.w) * self.narrow.cdf(x) + self.w * self.wide.cdf(x)
+
+    def sf(self, x):
+        return 1.0 - self.cdf(x)
+
+    def pdf(self, x):
+        return (1 - self.w) * self.narrow.pdf(x) + self.w * self.wide.pdf(x)
+
+    def ppf(self, q):
+        q = np.asarray(q, dtype=float)
+        lo = min(self.narrow.ppf(1e-6), self.wide.ppf(1e-6))
+        hi = max(self.narrow.ppf(1 - 1e-6), self.wide.ppf(1 - 1e-6))
+        grid = np.linspace(max(lo, 1e-9), hi, 4096)
+        return np.interp(q, self.cdf(grid), grid)
+
+
+def fit_tail_mixture(intervals: np.ndarray, window: int = 100, w_wide: float = 0.15):
+    """Lognormal on the recent window, widened by one fitted on the long history."""
+    x = np.asarray(intervals, dtype=float)
+    x = x[np.isfinite(x) & (x > 0)]
+    if len(x) < 12:
+        return None
+    recent = np.log(x[-window:])
+    narrow = stats.lognorm(
+        s=max(float(np.std(recent, ddof=1)), 1e-3), scale=np.exp(float(np.mean(recent)))
+    )
+    if len(x) < window * 3:
+        return narrow
+    long = np.log(x[-2000:])
+    # Floor the width. The validity filter deliberately censors the right tail
+    # (anything past 1.75x the local median is treated as a missed eruption), so
+    # a distribution fitted to what survives cannot represent a genuinely long
+    # interval at all -- and a model that thinks "late" is impossible will always
+    # prefer "we missed one". 0.20 in log space puts the wide component's 95th
+    # percentile near 1.4x the median, inside the range the filter still accepts.
+    wide_sd = max(float(np.std(long, ddof=1)), float(np.std(recent, ddof=1)) * 2.0, 0.20)
+    wide = stats.lognorm(s=wide_sd, scale=np.exp(float(np.mean(recent))))
+    return TailMixture(narrow, wide, w_wide)
+
+
 def renewal_forecast(
     dist: stats.rv_continuous,
     age_min: float,
@@ -612,8 +685,11 @@ def renewal_forecast(
         forecast correctly becomes "it probably already went, and the next one
         is roughly one interval from whenever that was".
 
-    Returns the forecast (minutes after the last LOGGED eruption) and the
-    weighted expected number of missed eruptions.
+    Returns the forecast (minutes after the last LOGGED eruption), the weighted
+    expected number of missed eruptions, and the posterior probability that NO
+    eruption has been missed -- i.e. that we are still inside the current cycle.
+    That last number is what a UI needs to say "overdue, expected any minute"
+    instead of silently swapping to a next-cycle time.
     """
     rng = np.random.default_rng(seed)
     # Cap p_obs: at exactly 1.0 every stale-data path gets zero weight and the
@@ -640,8 +716,10 @@ def renewal_forecast(
     w = np.exp(log_w) * ok
     if w.sum() <= 0:
         w = np.ones_like(w)
-    exp_missed = float(np.sum(w * k) / np.sum(w))
-    return SamplePrediction(next_time, w, "renewal"), exp_missed
+    tot = float(np.sum(w))
+    exp_missed = float(np.sum(w * k) / tot)
+    p_current = float(np.sum(w * (k == 0)) / tot)
+    return SamplePrediction(next_time, w, "renewal"), exp_missed, p_current
 
 
 def observation_completeness(history: pd.DataFrame, lookback: int = 400) -> float:

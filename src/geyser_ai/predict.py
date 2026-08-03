@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import datetime as dt
-
 import duckdb
 import numpy as np
 import pandas as pd
 
-from .backtest import load_all_intervals, load_intervals
+from .backtest import load_intervals
 from .config import DB_PATH, TARGET_GEYSERS
-from .models import default_models, observation_completeness, renewal_forecast
+from .models import default_models, fit_tail_mixture, renewal_forecast
+from .observation import observation_completeness_at
 
 
 def _anchor(geyser: str, db_path=DB_PATH) -> pd.Series | None:
@@ -125,9 +124,11 @@ def predict_geyser(
         last_ts = last_ts.tz_localize("UTC")
 
     def at(minutes: float) -> str:
-        return (last_ts + pd.Timedelta(minutes=float(minutes))).tz_convert(
-            "America/Denver"
-        ).strftime("%Y-%m-%d %H:%M %Z")
+        return (
+            (last_ts + pd.Timedelta(minutes=float(minutes)))
+            .tz_convert("America/Denver")
+            .strftime("%Y-%m-%d %H:%M %Z")
+        )
 
     now = pd.Timestamp.now(tz="UTC")
     age_min = float((now - last_ts).total_seconds()) / 60.0
@@ -140,8 +141,13 @@ def predict_geyser(
 
     # Renewal forecast: folds in the possibility that eruptions went unlogged
     # during the silent window. Reduces to the naive answer on fresh data.
-    p_obs = observation_completeness(load_all_intervals(geyser, db_path))
-    rpred, exp_missed = renewal_forecast(pred.dist, max(age_min, 0.0), p_obs)
+    # Observation-aware: a well-watched geyser running late is overdue, not
+    # missed. A single per-geyser constant made the forecast jump a whole cycle
+    # the moment a closely-watched geyser passed its median.
+    p_obs, p_obs_detail = observation_completeness_at(geyser, db_path=db_path)
+    # Widen the sharp rolling fit so being late is surprising, not impossible.
+    base_dist = fit_tail_mixture(hist["interval_min"].to_numpy()) or pred.dist
+    rpred, exp_missed, p_current = renewal_forecast(base_dist, max(age_min, 0.0), p_obs)
     med = rpred.median()
     lo50, hi50 = rpred.interval(0.50)
     lo90, hi90 = rpred.interval(0.90)
@@ -152,13 +158,14 @@ def predict_geyser(
         "geyser": geyser,
         "model": chosen,
         "last_eruption_utc": last_ts.isoformat(),
-        "last_eruption_local": last_ts.tz_convert("America/Denver").strftime(
-            "%Y-%m-%d %H:%M %Z"
-        ),
+        "last_eruption_local": last_ts.tz_convert("America/Denver").strftime("%Y-%m-%d %H:%M %Z"),
         "data_age_hours": round(age_min / 60.0, 1),
         "n_training_intervals": int(len(hist)),
         "observation_completeness": round(p_obs, 3),
+        "observation_detail": p_obs_detail,
         "expected_missed_eruptions": round(exp_missed, 2),
+        "current_cycle_prob": round(p_current, 3),
+        "overdue": bool(age_min > float(base_dist.ppf(0.5)) and p_current > 0.1),
         "data_is_stale": bool(stale),
         "median_interval_min": round(med, 1),
         "interval_50_min": [round(lo50, 1), round(hi50, 1)],
@@ -177,8 +184,9 @@ def predict_geyser(
     return result
 
 
-def predict_all(geysers: list[str] | None = None, model_name: str | None = None,
-                db_path=DB_PATH) -> list[dict]:
+def predict_all(
+    geysers: list[str] | None = None, model_name: str | None = None, db_path=DB_PATH
+) -> list[dict]:
     out = []
     for g in geysers or list(TARGET_GEYSERS):
         try:

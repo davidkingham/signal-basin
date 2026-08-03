@@ -81,9 +81,7 @@ def prediction_one(
 def eruptions_recent(
     hours: int = Query(24, ge=1, le=168),
     geyser: str | None = Query(None, description="Optional single-geyser filter."),
-    targets_only: bool = Query(
-        False, description="Restrict to the seven modelled geysers."
-    ),
+    targets_only: bool = Query(False, description="Restrict to the seven modelled geysers."),
 ) -> dict:
     if not DB_PATH.exists():
         raise HTTPException(503, "No database. Run `uv run geyser-ai ingest` first.")

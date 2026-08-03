@@ -60,9 +60,9 @@ INDICATOR_RELIABILITY = 0.94
 # Rift / West Triplet shifts are likewise off by default (CRPS +1.2%).
 TURBAN_PERIOD_DEFAULT = 19.0
 TURBAN_PERIOD_SD = 4.2
-TURBAN_FORBIDDEN = (4.5, 13.5)   # phase band, minutes after a Turban start
-TURBAN_FORBIDDEN_W = 0.05        # residual weight (never a hard zero)
-TURBAN_FRESH_MAX = 45.0          # older than this and we have lost the phase
+TURBAN_FORBIDDEN = (4.5, 13.5)  # phase band, minutes after a Turban start
+TURBAN_FORBIDDEN_W = 0.05  # residual weight (never a hard zero)
+TURBAN_FRESH_MAX = 45.0  # older than this and we have lost the phase
 
 # Rift / West Triplet raise Grand's next interval. Measured with a FIXED early
 # window after the anchor so long intervals get no mechanical advantage -- the
@@ -80,9 +80,7 @@ class NowcastResult:
     detail: dict = field(default_factory=dict)
 
 
-def load_eruption_epochs(
-    geyser: str, db_path=DB_PATH, since_year: int = 2010
-) -> np.ndarray:
+def load_eruption_epochs(geyser: str, db_path=DB_PATH, since_year: int = 2010) -> np.ndarray:
     """Sorted epochs for one geyser, near-duplicate entries collapsed."""
     con = duckdb.connect(str(db_path), read_only=True)
     try:
@@ -119,7 +117,9 @@ def _fit_base(intervals: np.ndarray, window: int = 100) -> stats.rv_continuous |
     if len(x) < 12:
         return None
     logs = np.log(x)
-    return stats.lognorm(s=max(float(np.std(logs, ddof=1)), 1e-3), scale=np.exp(float(np.mean(logs))))
+    return stats.lognorm(
+        s=max(float(np.std(logs, ddof=1)), 1e-3), scale=np.exp(float(np.mean(logs)))
+    )
 
 
 def _last_before(epochs: np.ndarray, t: int) -> int | None:
@@ -184,9 +184,7 @@ def nowcast(
             if i_ep is not None and i_ep > last_own:
                 elapsed = (t - i_ep) / 60.0
                 if elapsed <= INDICATOR_MAX_WAIT:
-                    survival = float(
-                        stats.norm.sf(elapsed, INDICATOR_LEAD_MEAN, INDICATOR_LEAD_SD)
-                    )
+                    survival = float(stats.norm.sf(elapsed, INDICATOR_LEAD_MEAN, INDICATOR_LEAD_SD))
                     num = INDICATOR_RELIABILITY * survival
                     indicator_w = num / (num + (1.0 - INDICATOR_RELIABILITY))
                     if indicator_w > 0.01:
@@ -212,14 +210,19 @@ def nowcast(
         if shift:
             dist = stats.lognorm(s=base.kwds["s"], loc=shift, scale=base.kwds["scale"])
 
-    pred, exp_missed = renewal_forecast(dist, max(age_min, 0.0), p_obs, n_sims=n_sims, seed=seed)
+    pred, exp_missed, p_current = renewal_forecast(
+        dist, max(age_min, 0.0), p_obs, n_sims=n_sims, seed=seed
+    )
     # renewal samples are minutes after `last_own`; we want minutes after `t`
     remaining = pred.samples - age_min
     w = pred.weights * (remaining > 0)
     if w.sum() <= 0:
         return None
     regime = "base"
-    detail: dict = {"expected_missed": round(exp_missed, 2)}
+    detail: dict = {
+        "expected_missed": round(exp_missed, 2),
+        "current_cycle_prob": round(p_current, 3),
+    }
     if shift:
         detail["precursor_shift_min"] = shift
         regime = "precursor_shifted"
@@ -231,7 +234,7 @@ def nowcast(
             L = _last_before(tur, t)
             if L is not None and (t - L) / 60.0 <= TURBAN_FRESH_MAX:
                 period = _turban_period(tur, t)
-                abs_min = (t - L) / 60.0 + remaining          # minutes since that Turban
+                abs_min = (t - L) / 60.0 + remaining  # minutes since that Turban
                 cycles = np.maximum(abs_min / period, 0.0)
                 # Phase knowledge decays as the lattice is extrapolated forward:
                 # each cycle adds sd, and once the spread reaches a quarter
@@ -285,7 +288,7 @@ def nowcast_backtest(
         return {}
     neigh = {n: load_eruption_epochs(n, db_path) for n in NEIGHBORS.get(geyser, [])}
 
-    now = int(dt.datetime.now(dt.timezone.utc).timestamp())
+    now = int(dt.datetime.now(dt.UTC).timestamp())
     start = now - years * 365 * 86400
     grid = list(range(start, now, step_min * 60))
 
@@ -321,10 +324,26 @@ def nowcast_backtest(
         # against each other is apples-to-oranges -- the conditioned regimes are
         # not a random sample of moments (a Rift-shifted moment is an
         # intrinsically longer wait), so only a paired delta is meaningful.
-        on = nowcast(geyser, t, own[:j], iv_vals[:k], nb,
-                     use_indicator=True, use_turban=True, use_precursors=True)
-        off = nowcast(geyser, t, own[:j], iv_vals[:k], nb,
-                      use_indicator=False, use_turban=False, use_precursors=False)
+        on = nowcast(
+            geyser,
+            t,
+            own[:j],
+            iv_vals[:k],
+            nb,
+            use_indicator=True,
+            use_turban=True,
+            use_precursors=True,
+        )
+        off = nowcast(
+            geyser,
+            t,
+            own[:j],
+            iv_vals[:k],
+            nb,
+            use_indicator=False,
+            use_turban=False,
+            use_precursors=False,
+        )
         if on is None or off is None:
             continue
         rec = {"regime": on.regime, "actual": actual}
@@ -337,9 +356,12 @@ def nowcast_backtest(
                 break
             lo50, hi50 = p.interval(0.50)
             lo90, hi90 = p.interval(0.90)
-            rec |= {f"crps_{tag}": c, f"median_{tag}": p.median(),
-                    f"in50_{tag}": lo50 <= actual <= hi50,
-                    f"in90_{tag}": lo90 <= actual <= hi90}
+            rec |= {
+                f"crps_{tag}": c,
+                f"median_{tag}": p.median(),
+                f"in50_{tag}": lo50 <= actual <= hi50,
+                f"in90_{tag}": lo90 <= actual <= hi90,
+            }
         if ok:
             rows.append(rec)
 
@@ -358,7 +380,9 @@ def nowcast_backtest(
                 "cover50": float(d[f"in50_{tag}"].mean()),
                 "cover90": float(d[f"in90_{tag}"].mean()),
             }
-        out["crps_delta_pct"] = 100.0 * (out["on"]["crps"] - out["off"]["crps"]) / out["off"]["crps"]
+        out["crps_delta_pct"] = (
+            100.0 * (out["on"]["crps"] - out["off"]["crps"]) / out["off"]["crps"]
+        )
         out["mae_delta_pct"] = 100.0 * (out["on"]["mae"] - out["off"]["mae"]) / out["off"]["mae"]
         return out
 

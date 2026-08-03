@@ -173,7 +173,7 @@ def sync_recent(
                         eid,
                         geyser,
                         epoch,
-                        dt.datetime.fromtimestamp(epoch, tz=dt.timezone.utc),
+                        dt.datetime.fromtimestamp(epoch, tz=dt.UTC),
                         *[_as_bool(e.get(k)) for k in _FLAGS],
                         _as_float(e.get("durationSec")),
                         e.get("entrant"),

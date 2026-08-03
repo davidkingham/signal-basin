@@ -113,6 +113,11 @@ button.theme:focus-visible{outline:2px solid var(--pool-500);outline-offset:2px}
 .card.soon{border-color:var(--mat)}
 /* A neighbour geyser is actively signalling — the strongest state on the page */
 .card.live{border-color:var(--mat);box-shadow:0 0 0 1px var(--mat) inset}
+.card.overdue{border-color:var(--amber)}
+.overdue-note{
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--amber);font-weight:700;margin-top:3px;
+}
 .live-note{
   font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
   color:var(--mat);font-weight:700;margin-top:3px;
@@ -416,11 +421,17 @@ function card(p){
   const beyond = p.minutes_until > HOURS*60;
   const live = p.regime && p.regime !== "base";
   if (live) el.classList.add("live");
+  // Past the median but the current cycle is still the likely story. Say so
+  // explicitly rather than letting the number drift and confuse people.
+  const overdue = !live && p.overdue && p.current_cycle_prob > 0.15;
+  if (overdue) el.classList.add("overdue");
   el.innerHTML = `
     <div class="row1">
       <h3 class="name">${p.geyser}</h3>
       <div class="until">${humanMins(p.minutes_until)}</div>
     </div>
+    ${overdue ? `<div class="overdue-note">Overdue — expected any minute (${
+        Math.round(p.current_cycle_prob*100)}% this cycle)</div>` : ""}
     ${live ? `<div class="live-note">Indicator running${
         p.regime_detail && p.regime_detail.indicator_elapsed_min != null
           ? ` — started ${Math.round(p.regime_detail.indicator_elapsed_min)} min ago` : ""

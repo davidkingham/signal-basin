@@ -72,11 +72,15 @@ def download_archive(version: str | None = None, force: bool = False) -> Path:
             return cached
 
     today = dt.date.today()
-    versions = [version] if version else [
-        str(today),
-        str(today - dt.timedelta(days=1)),
-        str(today + dt.timedelta(days=1)),
-    ]
+    versions = (
+        [version]
+        if version
+        else [
+            str(today),
+            str(today - dt.timedelta(days=1)),
+            str(today + dt.timedelta(days=1)),
+        ]
+    )
 
     headers = {"User-Agent": USER_AGENT}
     last_error: str = ""

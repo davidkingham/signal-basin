@@ -30,8 +30,10 @@ def backtest(
     geyser: list[str] = typer.Option(None, "--geyser", "-g", help="Repeatable; default all."),
     years: int = typer.Option(3, "--years", help="Years of walk-forward evaluation."),
     nowcast: bool = typer.Option(
-        True, "--nowcast/--no-nowcast",
-        help="Also score neighbour-geyser conditioning (slow; Beehive and Grand)."),
+        True,
+        "--nowcast/--no-nowcast",
+        help="Also score neighbour-geyser conditioning (slow; Beehive and Grand).",
+    ),
 ) -> None:
     """Run the walk-forward backtest and write reports/calibration_report.md."""
     from .backtest import honest_coverage, run_backtest
@@ -75,7 +77,8 @@ def backtest(
                 o = res["overall"]
                 console.print(
                     f"  {g:<10} n={o['n']:,}  CRPS {o['off']['crps']:.1f} -> "
-                    f"{o['on']['crps']:.1f} ({o['crps_delta_pct']:+.1f}%)")
+                    f"{o['on']['crps']:.1f} ({o['crps_delta_pct']:+.1f}%)"
+                )
 
     path = write_report(scores, recs, years=years, honest=honest, nowcasts=nowcasts)
     console.print(f"\n[green]Wrote {path}[/green]")
