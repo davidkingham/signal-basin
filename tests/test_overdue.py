@@ -148,28 +148,20 @@ class TestTailMixture:
         late = med * 1.15
         bare = stats.lognorm(s=0.04, scale=med)
         assert bare.sf(late) < 1e-3, "fixture should make 'late' near-impossible bare"
-        assert mix.sf(late) > 0.02, (
-            f"a late eruption must stay plausible (got {mix.sf(late):.4f})"
-        )
+        assert mix.sf(late) > 0.02, f"a late eruption must stay plausible (got {mix.sf(late):.4f})"
         assert mix.ppf(0.99) > med * 1.2, "far tail must reach genuinely long intervals"
 
     def test_quantiles_monotone(self):
-        mix = fit_tail_mixture(
-            np.random.default_rng(1).lognormal(np.log(100), 0.05, 3000)
-        )
+        mix = fit_tail_mixture(np.random.default_rng(1).lognormal(np.log(100), 0.05, 3000))
         qs = [mix.ppf(q) for q in (0.05, 0.25, 0.5, 0.75, 0.95)]
         assert all(b > a for a, b in zip(qs, qs[1:], strict=False)), qs
 
     def test_cdf_and_ppf_are_consistent(self):
-        mix = fit_tail_mixture(
-            np.random.default_rng(2).lognormal(np.log(100), 0.05, 3000)
-        )
+        mix = fit_tail_mixture(np.random.default_rng(2).lognormal(np.log(100), 0.05, 3000))
         for q in (0.1, 0.5, 0.9):
             assert mix.cdf(mix.ppf(q)) == pytest.approx(q, abs=0.02)
 
     def test_sampling_matches_the_cdf(self):
-        mix = fit_tail_mixture(
-            np.random.default_rng(3).lognormal(np.log(100), 0.05, 3000)
-        )
+        mix = fit_tail_mixture(np.random.default_rng(3).lognormal(np.log(100), 0.05, 3000))
         s = mix.rvs(40000, random_state=np.random.default_rng(4))
         assert (s < mix.ppf(0.5)).mean() == pytest.approx(0.5, abs=0.02)
