@@ -1,0 +1,60 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "geyser-ai",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-03",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Recomputes the cached prediction endpoints off the request path, but only
+  // while somebody is actually reading them -- see `scheduled` in worker/index.ts.
+  "triggers": {
+    "crons": ["*/2 * * * *"]
+  },
+
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+
+  "containers": [
+    {
+      "class_name": "GeyserContainer",
+      "image": "./Dockerfile",
+      // 1/4 vCPU, 1 GiB memory, 4 GB disk. Peak RSS serving predictions is
+      // ~450 MB and the snapshot is ~200 MB on disk, so this fits. standard-1
+      // was measured and did not make prediction requests meaningfully faster,
+      // so the cheaper instance is the right one -- see the cache below.
+      "instance_type": "basic",
+      // Hard cap of one. Every instance would run its own GeyserTimes sync
+      // timer, so more instances would multiply the request rate against a
+      // small nonprofit's server. Scales to zero via `sleepAfter`.
+      "max_instances": 1
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GEYSER_CONTAINER",
+        "class_name": "GeyserContainer"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GeyserContainer"]
+    }
+  ],
+
+  // Holds the DuckDB snapshot built locally by `uv run geyser-ai ingest`.
+  // The container reads it through the Worker's outbound handler, so no R2
+  // credentials are needed inside the image.
+  "r2_buckets": [
+    {
+      "binding": "SNAPSHOT",
+      "bucket_name": "geyser-ai-snapshots"
+    }
+  ]
+}

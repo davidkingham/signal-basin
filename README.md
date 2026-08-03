@@ -13,7 +13,9 @@ their public data.
 ## Status
 
 Phase 0 (ingestion), Phase 1 (prediction engine + backtest) and Phase 2 (API,
-dashboard, MCP server) are complete. See
+dashboard, MCP server) are complete, and the dashboard is deployed at
+**[geyser-ai.david-016.workers.dev](https://geyser-ai.david-016.workers.dev)**
+(see [Deployment](#deployment)). See
 [`reports/calibration_report.md`](reports/calibration_report.md) for the full
 metrics table and calibration plots.
 
@@ -348,6 +350,105 @@ models.py ─> predict.py┘               └─> mcp_server.py  (stdio)
 
 `service.py` is the single read layer; `api.py` and `mcp_server.py` are
 transports over it and hold no logic of their own.
+
+## Deployment
+
+Live at **https://geyser-ai.david-016.workers.dev**.
+
+The Workers runtime has no DuckDB, no SciPy and no lifelines, so there is no
+version of this app that runs as a plain Worker. Instead the app runs unmodified
+inside a **Cloudflare Container**, and a thin Worker in front of it is the public
+front door.
+
+```
+browser ──> Worker ──> Container: uvicorn + FastAPI + DuckDB (exactly one instance)
+              │             │
+              │             └──> geysertimes.org/api/v5/entries_recent  (5-min TTL)
+              └──> R2 bucket: geysertimes.duckdb snapshot
+```
+
+**A deployed container never downloads the GeyserTimes archive.** The complete
+archive is fetched exactly once, by a developer running `uv run geyser-ai ingest`
+locally; the resulting DuckDB file is published to R2 and every container reads
+it from there:
+
+```bash
+uv run geyser-ai ingest          # one archive download, cached in data/raw/
+./deploy/publish-snapshot.sh     # ~200 MB -> r2://geyser-ai-snapshots
+```
+
+The container's only live traffic to GeyserTimes is the same
+`entries_recent/{minutes}` sync the local app makes, on the same five-minute TTL
+and with the same identifying User-Agent. That is why the container is capped at
+**one instance**: a second one would run its own sync timer and double the
+request rate against a small nonprofit's server for no benefit.
+
+The container holds no R2 credentials. It fetches `http://geyser-snapshot.r2/…`,
+and the Worker intercepts that hostname with an
+[outbound handler](https://developers.cloudflare.com/containers/platform-details/workers-connections/)
+that answers from its R2 binding inside the Workers runtime. Only plain HTTP is
+intercepted, so the HTTPS calls to geysertimes.org leave the container untouched.
+
+Startup is deliberately split. Cloudflare gives a container about twenty seconds
+to start listening, and the snapshot takes longer than that to pull, so
+`deploy/entrypoint.py` starts uvicorn immediately and downloads on a background
+thread. Until the file lands the API returns its existing "no database" 503, the
+Worker holds the request through the container's startup hook, and anything
+still early gets a self-refreshing "warming up" page rather than an error.
+
+### Why there is a cache
+
+A prediction request costs the deployed container **20–40 seconds**. That is not
+the models being slow — the identical image answers in 0.7 s in a local container
+pinned to the same fraction of a CPU. Cloudflare's container CPU is simply far
+slower for this scalar NumPy/SciPy work, and it did not improve when tested on
+`standard-1` (double the vCPU, four times the memory), so the cheaper instance is
+the one deployed.
+
+Rather than change any modelling code, the Worker keeps the last computed
+response in the container's Durable Object storage and recomputes it off the
+request path:
+
+- a reader is served the cached answer in **under 100 ms**;
+- a cron trigger every two minutes recomputes whichever endpoints have actually
+  been read in the last ten minutes, so an unvisited site does no work at all,
+  nothing touches the container, and it scales to zero;
+- past ten minutes of staleness the Worker stops trusting the cron and
+  recomputes on the request, so nobody is ever handed a stale prediction;
+- `/api/health` is never cached — it is the honest freshness probe.
+
+Served responses carry `x-geyser-cache: hit|stale|miss` and `x-geyser-cache-age`
+so the freshness is inspectable rather than implied.
+
+### Settings
+
+| Setting | Value | Why |
+|---|---|---|
+| `instance_type` | `basic` (1/4 vCPU, 1 GiB, 4 GB disk) | Peak RSS is ~450 MB and the snapshot ~200 MB; larger instances bought no speed |
+| `max_instances` | 1 | One sync timer, one poll rate against GeyserTimes |
+| `sleepAfter` | 30m | Scales to zero when nobody is watching |
+| cron | `*/2 * * * *` | Recomputes the cache, but only while the site is being read |
+| R2 bucket | `geyser-ai-snapshots` | Holds `geysertimes.duckdb` |
+
+### Deploying
+
+```bash
+npm install
+npx wrangler types          # regenerates worker-configuration.d.ts
+npx wrangler deploy         # builds the image, pushes it, deploys the Worker
+npx wrangler tail           # live logs, container output included
+```
+
+Requires Docker running locally and the Workers Paid plan — Containers are not
+available on the free plan. Container rollouts are gradual, so for a minute or
+two after a deploy some requests can hit the previous version.
+
+**Caveats.** A cold start costs a container boot plus a ~200 MB snapshot
+download, then one uncached prediction run, so the first visit after an idle
+period is slow; everything after it is instant. Refreshing the archive means
+re-running `ingest` and `publish-snapshot.sh`; running containers pick up the new
+snapshot on their next cold start. For realistic traffic the whole thing sits
+inside the Workers Paid plan's included container allowance.
 
 ## Data attribution and gentle use
 

@@ -1,0 +1,32 @@
+# The image carries code only. The DuckDB snapshot and the raw GeyserTimes
+# archive are pulled from R2 at runtime, never baked in.
+data/
+reports/
+docs/
+tests/
+
+.git/
+.github/
+.venv/
+node_modules/
+.wrangler/
+
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+.DS_Store
+.idea/
+.vscode/
+
+worker/
+wrangler.jsonc
+package.json
+package-lock.json
+tsconfig.json
+worker-configuration.d.ts
