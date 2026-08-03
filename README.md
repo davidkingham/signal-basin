@@ -84,6 +84,7 @@ Community-flagged `questionable` entries are excluded from the `eruptions` view.
 | `duration_lognormal` | Old Faithful only: short/long preceding-duration split |
 | `minor_conditional` | Castle & Old Faithful: conditions on whether the previous eruption was a *minor* |
 | `entry_conditional` | Logger-heavy geysers: conditions on whether the anchor came from an electronic logger |
+| *nowcast + Indicator* | Beehive: switches to a ~12-minute countdown once Beehive's Indicator starts |
 
 **Backtest.** Walk-forward over the last 3 years. At each evaluated eruption a
 model sees only intervals strictly earlier than the one it is predicting. All
@@ -168,6 +169,55 @@ entries are true intervals, whereas human-only stretches still contain missed on
 (mean 813 vs median 708 is a heavy right tail). The implied model,
 `entry_conditional`, **does not help** (Great Fountain 46.0 vs 45.6 for plain
 lognormal). It is kept in the roster and reported rather than quietly dropped.
+
+### Neighbour geysers: the Indicator works, the Turban lattice doesn't
+
+Two geysers have documented neighbour relationships, and both are already in the
+archive at no extra data cost. They are scored on a **nowcast** harness — decision
+times on a fixed 30-minute grid, each scored twice with conditioning on and off —
+because "how long until the next eruption, standing here now" is both what a gazer
+asks and the only unbiased way to score a conditional regime.
+
+| Geyser | Regime | n | CRPS off | CRPS on | Δ | 90% cov off | 90% cov on |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Beehive | overall | 31,008 | 118.2 | 114.8 | −2.9% | 85% | 89% |
+| Beehive | no Indicator | 28,937 | 116.1 | 116.2 | ±0.0% | 89% | 90% |
+| **Beehive** | **Indicator running** | **2,071** | **147.4** | **95.2** | **−35.4%** | **29%** | **87%** |
+| Grand | overall | 21,656 | 44.5 | 44.5 | +0.2% | 90% | 90% |
+| Grand | Turban gated | 1,727 | 42.3 | 42.4 | +0.2% | 92% | 92% |
+| Grand | Rift/W. Triplet shifted | 1,688 | 53.6 | 54.4 | +1.6% | 87% | 86% |
+
+**Beehive's Indicator is the single most valuable signal found in this project.**
+Beehive's Indicator starts, and Beehive follows about 12 minutes later (n=3,035
+since 2015: mean 11.9 min, sd 4.8; a normal fits far better than lognormal or
+gamma, KS 0.070 vs 0.178). Measured the other way round, 93.7% of Indicator
+entries are followed by Beehive within 25 minutes. During those minutes CRPS falls
+by a third and the nominal 90% interval goes from catching **29%** of eruptions to
+**87%** — the unconditioned model is wildly overconfident exactly when someone is
+standing there waiting. Outside that window nothing changes, which is the point.
+
+It is implemented as a Bayesian **mixture**, not a switch: the Indicator branch
+carries weight ∝ reliability × P(lead > elapsed), so if 30 minutes pass with no
+eruption the branch decays on its own and the ordinary distribution takes back
+over. An early version hard-switched and produced 141 min of error by insisting
+"any second now" long after the Indicator had plainly failed.
+
+**Grand's Turban lattice is a negative result, reported rather than deleted.**
+Grand starts *with* a Turban: only 0.1% of Grand starts fall 5–13 minutes after
+one, against 24% in the first two minutes. Gating the density onto that lattice
+looks obviously right and does not work. Turban's interval scatters (sd 4.2 min on
+a 19 min period) so extrapolated phase decoheres within about one cycle, and
+Grand's own uncertainty is ~100 min — five times the Turban period. The model's
+predicted median for Grand never drops below 40 minutes, so the lattice is never
+consulted at a range where it could discriminate. Rift (+32 min) and West Triplet
+(+15 min) both survive a length-bias-safe significance test yet still fail to
+improve the distribution. All three are kept behind flags so the result stays
+reproducible.
+
+One trap worth recording: the naive "did Rift erupt anywhere between the two Grand
+eruptions?" test gives +45 min, but that is **length-biased** — longer intervals
+mechanically have more room for a Rift. Measured in a *fixed* early window it is
++32 min. Roughly 40% of the apparent effect was an artifact of the question.
 
 ### Honest coverage
 

@@ -59,6 +59,73 @@ def _density_curve(
     ]
 
 
+def _nowcast_override(geyser: str, hours: float, n_points: int, db_path) -> dict | None:
+    """Neighbour-conditioned nowcast, when a neighbour is actually telling us something.
+
+    Only Beehive currently qualifies: once its Indicator starts, the eruption
+    follows in about 12 minutes and the ordinary interval model is hopelessly
+    wide. Returns None whenever no neighbour signal is active, so the six other
+    geysers and the quiet 93% of Beehive's cycle are untouched.
+    """
+    from .nowcast import NEIGHBORS, load_eruption_epochs, load_valid_intervals, nowcast
+
+    if geyser not in NEIGHBORS:
+        return None
+    now = int(dt.datetime.now(dt.timezone.utc).timestamp())
+    try:
+        own = load_eruption_epochs(geyser, db_path)
+        iv = load_valid_intervals(geyser, db_path)
+        neigh = {n: load_eruption_epochs(n, db_path) for n in NEIGHBORS[geyser]}
+    except Exception:
+        return None
+    if len(own) < 100 or len(iv) < 100:
+        return None
+    res = nowcast(geyser, now, own, iv[:, 1].astype(float), neigh, n_sims=8000)
+    if res is None or res.regime == "base":
+        return None
+
+    p = res.pred
+    t0 = pd.Timestamp.now(tz="UTC")
+    med = max(p.median(), 0.0)
+    lo50, hi50 = (max(x, 0.0) for x in p.interval(0.50))
+    lo90, hi90 = (max(x, 0.0) for x in p.interval(0.90))
+    grid = pd.date_range(t0, t0 + pd.Timedelta(hours=hours), periods=n_points)
+    mins = (grid - t0).total_seconds() / 60.0
+    edges = np.linspace(mins[0], mins[-1], n_points + 1)
+    dens, _ = np.histogram(p.samples, bins=edges, weights=p.weights)
+    k = np.exp(-0.5 * (np.linspace(-2, 2, 9) ** 2))
+    dens = np.convolve(dens, k / k.sum(), mode="same")
+    peak = float(dens.max())
+    if peak > 0:
+        dens = dens / peak
+
+    def at(m: float) -> str:
+        return (t0 + pd.Timedelta(minutes=float(m))).tz_convert(PARK_TZ).strftime(
+            "%Y-%m-%d %H:%M %Z"
+        )
+
+    return {
+        "regime": res.regime,
+        "regime_detail": res.detail,
+        "median_interval_min": round(med, 1),
+        "interval_50_min": [round(lo50, 1), round(hi50, 1)],
+        "interval_90_min": [round(lo90, 1), round(hi90, 1)],
+        "predicted_time_local": at(med),
+        "window_50_local": [at(lo50), at(hi50)],
+        "window_90_local": [at(lo90), at(hi90)],
+        "predicted_utc": (t0 + pd.Timedelta(minutes=med)).isoformat(),
+        "window_50_utc": [(t0 + pd.Timedelta(minutes=lo50)).isoformat(),
+                          (t0 + pd.Timedelta(minutes=hi50)).isoformat()],
+        "window_90_utc": [(t0 + pd.Timedelta(minutes=lo90)).isoformat(),
+                          (t0 + pd.Timedelta(minutes=hi90)).isoformat()],
+        "minutes_until": round(med, 1),
+        "density": [
+            {"t": ts.tz_convert(PARK_TZ).isoformat(), "d": round(float(v), 5)}
+            for ts, v in zip(grid, dens)
+        ],
+    }
+
+
 def get_predictions(
     geysers: list[str] | None = None,
     hours: float = 12.0,
@@ -99,6 +166,17 @@ def get_predictions(
         r["minutes_until"] = round(
             (pd.Timestamp(r["predicted_utc"]) - now).total_seconds() / 60.0, 1
         )
+        r["regime"] = "base"
+
+        # A live neighbour signal (Beehive's Indicator) beats the interval model
+        # outright, so let it take over the timing when it fires.
+        try:
+            over = _nowcast_override(g, hours, density_points, db_path)
+        except Exception:
+            over = None
+        if over:
+            r.update(over)
+            r["model"] = f"{r['model']} + {over['regime']}"
         out.append(r)
 
     ok = [r for r in out if "error" not in r]

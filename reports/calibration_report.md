@@ -103,6 +103,30 @@ Everything above is measured only on intervals that passed the validity filter, 
 The drop between the last two columns is the real-world penalty. Treat the headline table as an upper bound on field reliability, and see the renewal/missed-eruption handling in `predict` (README) for how the CLI compensates at prediction time.
 
 
+## Neighbour-geyser conditioning (nowcast)
+
+The interval harness above asks *how long is the gap after this eruption*. That cannot express what actually helps a gazer — *standing here now, with Beehive's Indicator running, when does it go?* — so these are scored from decision times on a fixed 30-minute grid, independent of when eruptions happen. Scoring only just-before-an-eruption would be conditioning on the answer.
+
+
+Each decision time is scored **twice, identically**, with neighbour conditioning on and off. Only a paired delta is meaningful here: the conditioned moments are not a random sample of time.
+
+
+| Geyser | Regime | n | CRPS off | CRPS on | Δ | 90% off | 90% on |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Grand | **overall** | 21,656 | 44.5 | 44.5 | +0.2% | 90% | 90% |
+| Grand | base | 18,241 | 43.8 | 43.8 | +0.0% | 90% | 90% |
+| Grand | precursor_shifted | 1,688 | 53.6 | 54.4 | +1.6% | 87% | 86% |
+| Grand | turban_gated | 1,727 | 42.3 | 42.4 | +0.2% | 92% | 92% |
+| Beehive | **overall** | 31,008 | 118.2 | 114.8 | -2.9% | 85% | 89% |
+| Beehive | base | 28,937 | 116.1 | 116.2 | +0.0% | 89% | 90% |
+| Beehive | indicator_active | 2,071 | 147.4 | 95.2 | -35.4% | 29% | 87% |
+
+**Beehive's Indicator works.** In the minutes it is running, CRPS falls by about a third and nominal 90% coverage goes from badly overconfident to roughly honest. The no-Indicator regime is untouched, which is the point — the conditioning adds information only when there is information to add. Residual error in that regime is dominated by cycles where the Beehive eruption itself was never logged (~6% of Indicator entries), not by the model.
+
+
+**Grand's Turban lattice does not work, and is off by default.** Grand starts *with* a Turban — only 0.1% of starts fall 5-13 minutes after one, against 24% in the first two minutes — so gating the density onto that lattice looks obviously right. It isn't. Turban's own interval scatters (sd 4.2 min on a 19 min period) so extrapolated phase decoheres within about one cycle, and Grand's own uncertainty is ~100 min, five times the Turban period. The model's predicted median never drops below 40 minutes, so the lattice is never consulted at a range where it could discriminate. Rift and West Triplet shifts (+32 and +15 min, both highly significant under a length-bias-safe test) likewise fail to improve the distribution. Both are kept switchable so the negative result stays reproducible.
+
+
 ## Figures
 
 ![interval_histograms.png](figures/interval_histograms.png)

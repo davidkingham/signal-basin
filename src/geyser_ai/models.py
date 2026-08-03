@@ -79,6 +79,27 @@ class SamplePrediction:
         lo = (1.0 - level) / 2.0
         return self._q(lo), self._q(1.0 - lo)
 
+    def cdf(self, x: float) -> float:
+        w = self.weights.sum()
+        return float((self.weights * (self.samples <= x)).sum() / w) if w > 0 else float("nan")
+
+    def crps(self, actual: float, n_grid: int = 512) -> float:
+        """Same numeric-integration CRPS as `Prediction`, on the weighted ECDF."""
+        w = self.weights
+        if w.sum() <= 0:
+            return float("nan")
+        lo = min(float(self._q(0.0005)), actual)
+        hi = max(float(self._q(0.9995)), actual)
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            return float("nan")
+        grid = np.linspace(lo, hi, n_grid)
+        order = np.argsort(self.samples)
+        s, ws = self.samples[order], w[order]
+        cw = np.cumsum(ws) / ws.sum()
+        cdf = np.interp(grid, s, cw, left=0.0, right=1.0)
+        step = (grid >= actual).astype(float)
+        return float(np.trapezoid((cdf - step) ** 2, grid))
+
 
 class Model(Protocol):
     name: str

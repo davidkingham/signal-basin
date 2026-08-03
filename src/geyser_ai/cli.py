@@ -29,6 +29,9 @@ def ingest(
 def backtest(
     geyser: list[str] = typer.Option(None, "--geyser", "-g", help="Repeatable; default all."),
     years: int = typer.Option(3, "--years", help="Years of walk-forward evaluation."),
+    nowcast: bool = typer.Option(
+        True, "--nowcast/--no-nowcast",
+        help="Also score neighbour-geyser conditioning (slow; Beehive and Grand)."),
 ) -> None:
     """Run the walk-forward backtest and write reports/calibration_report.md."""
     from .backtest import honest_coverage, run_backtest
@@ -56,7 +59,25 @@ def backtest(
                 f"  {g:<16} n={hc['n']:>5,}  rejected={hc['pct_filtered_out']:4.1f}%  "
                 f"50%={hc['cover50']:.1%}  90%={hc['cover90']:.1%}"
             )
-    path = write_report(scores, recs, years=years, honest=honest)
+    nowcasts: dict[str, dict] = {}
+    if nowcast:
+        from .nowcast import NEIGHBORS, nowcast_backtest
+
+        for g in [x for x in targets if x in NEIGHBORS]:
+            console.print(f"Nowcast (neighbour-conditioned) backtest: {g} ...")
+            try:
+                res = nowcast_backtest(g, years=2, step_min=30)
+            except Exception as exc:
+                console.print(f"  {g}: nowcast failed ({exc})")
+                continue
+            if res:
+                nowcasts[g] = res
+                o = res["overall"]
+                console.print(
+                    f"  {g:<10} n={o['n']:,}  CRPS {o['off']['crps']:.1f} -> "
+                    f"{o['on']['crps']:.1f} ({o['crps_delta_pct']:+.1f}%)")
+
+    path = write_report(scores, recs, years=years, honest=honest, nowcasts=nowcasts)
     console.print(f"\n[green]Wrote {path}[/green]")
 
 

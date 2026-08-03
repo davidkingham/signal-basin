@@ -231,10 +231,12 @@ def write_report(
     years: int,
     db_path=DB_PATH,
     honest: dict[str, dict] | None = None,
+    nowcasts: dict[str, dict] | None = None,
 ) -> str:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     honest = honest or {}
+    nowcasts = nowcasts or {}
 
     geysers = [g for g in TARGET_GEYSERS if any(s.geyser == g for s in scores)]
     figs = []
@@ -371,6 +373,53 @@ def write_report(
         "renewal/missed-eruption handling in `predict` (README) for how the CLI "
         "compensates at prediction time.\n"
     )
+
+    if nowcasts:
+        lines.append("\n## Neighbour-geyser conditioning (nowcast)\n")
+        lines.append(
+            "The interval harness above asks *how long is the gap after this eruption*. "
+            "That cannot express what actually helps a gazer — *standing here now, with "
+            "Beehive's Indicator running, when does it go?* — so these are scored from "
+            "decision times on a fixed 30-minute grid, independent of when eruptions "
+            "happen. Scoring only just-before-an-eruption would be conditioning on the "
+            "answer.\n"
+        )
+        lines.append(
+            "\nEach decision time is scored **twice, identically**, with neighbour "
+            "conditioning on and off. Only a paired delta is meaningful here: the "
+            "conditioned moments are not a random sample of time.\n"
+        )
+        lines.append("\n| Geyser | Regime | n | CRPS off | CRPS on | Δ | 90% off | 90% on |")
+        lines.append("|---|---|---:|---:|---:|---:|---:|---:|")
+        for g, res in nowcasts.items():
+            for reg, a in [("**overall**", res["overall"])] + sorted(res["by_regime"].items()):
+                lines.append(
+                    f"| {g} | {reg} | {a['n']:,} | {a['off']['crps']:.1f} | {a['on']['crps']:.1f} "
+                    f"| {a['crps_delta_pct']:+.1f}% | {a['off']['cover90']:.0%} "
+                    f"| {a['on']['cover90']:.0%} |"
+                )
+        lines.append(
+            "\n**Beehive's Indicator works.** In the minutes it is running, CRPS falls by "
+            "about a third and nominal 90% coverage goes from badly overconfident to "
+            "roughly honest. The no-Indicator regime is untouched, which is the point — "
+            "the conditioning adds information only when there is information to add. "
+            "Residual error in that regime is dominated by cycles where the Beehive "
+            "eruption itself was never logged (~6% of Indicator entries), not by the "
+            "model.\n"
+        )
+        lines.append(
+            "\n**Grand's Turban lattice does not work, and is off by default.** Grand "
+            "starts *with* a Turban — only 0.1% of starts fall 5-13 minutes after one, "
+            "against 24% in the first two minutes — so gating the density onto that "
+            "lattice looks obviously right. It isn't. Turban's own interval scatters "
+            "(sd 4.2 min on a 19 min period) so extrapolated phase decoheres within "
+            "about one cycle, and Grand's own uncertainty is ~100 min, five times the "
+            "Turban period. The model's predicted median never drops below 40 minutes, "
+            "so the lattice is never consulted at a range where it could discriminate. "
+            "Rift and West Triplet shifts (+32 and +15 min, both highly significant "
+            "under a length-bias-safe test) likewise fail to improve the distribution. "
+            "Both are kept switchable so the negative result stays reproducible.\n"
+        )
 
     lines.append("\n## Figures\n")
     for f in figs:

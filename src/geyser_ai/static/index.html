@@ -111,6 +111,13 @@ button.theme:focus-visible{outline:2px solid var(--pool-500);outline-offset:2px}
   padding:13px 14px 10px;margin:9px 0;
 }
 .card.soon{border-color:var(--mat)}
+/* A neighbour geyser is actively signalling — the strongest state on the page */
+.card.live{border-color:var(--mat);box-shadow:0 0 0 1px var(--mat) inset}
+.live-note{
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--mat);font-weight:700;margin-top:3px;
+}
+.live-note::before{content:"● ";}
 .row1{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .name{
   font-size:15px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
@@ -407,11 +414,17 @@ function card(p){
   }
 
   const beyond = p.minutes_until > HOURS*60;
+  const live = p.regime && p.regime !== "base";
+  if (live) el.classList.add("live");
   el.innerHTML = `
     <div class="row1">
       <h3 class="name">${p.geyser}</h3>
       <div class="until">${humanMins(p.minutes_until)}</div>
     </div>
+    ${live ? `<div class="live-note">Indicator running${
+        p.regime_detail && p.regime_detail.indicator_elapsed_min != null
+          ? ` — started ${Math.round(p.regime_detail.indicator_elapsed_min)} min ago` : ""
+      }</div>` : ""}
     <div class="at">${hhmm(p.predicted_utc)} most likely${beyond ? " · beyond the axis" : ""}</div>`;
 
   el.appendChild(ribbon(p));
