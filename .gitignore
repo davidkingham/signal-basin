@@ -1,0 +1,22 @@
+# Data (never commit raw archives or the DuckDB database)
+data/raw/
+data/*.duckdb
+data/*.duckdb.wal
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Reports: keep the markdown + figures tracked, they're the deliverable.
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

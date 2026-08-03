@@ -1,0 +1,341 @@
+"""Next-eruption models. Every model returns a full predictive distribution.
+
+A `Prediction` wraps a frozen scipy distribution so the backtest can score any
+model the same way: CRPS, median error, and interval coverage all come from the
+CDF/PPF, never from a point estimate.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol
+
+import numpy as np
+import pandas as pd
+from scipy import stats
+
+
+@dataclass(frozen=True)
+class Prediction:
+    """A predictive distribution over the next interval, in minutes."""
+
+    dist: stats.rv_continuous  # actually a frozen distribution
+    model: str
+
+    def median(self) -> float:
+        return float(self.dist.ppf(0.5))
+
+    def interval(self, level: float) -> tuple[float, float]:
+        lo = (1.0 - level) / 2.0
+        return float(self.dist.ppf(lo)), float(self.dist.ppf(1.0 - lo))
+
+    def crps(self, actual: float, n_grid: int = 512) -> float:
+        """CRPS by numeric integration of (F(x) - 1{x >= y})^2.
+
+        Integrated over a grid spanning the distribution's 0.001-0.999 range
+        widened to include the actual value, which keeps the estimate honest
+        when a model is badly miscalibrated.
+        """
+        lo = float(self.dist.ppf(0.0005))
+        hi = float(self.dist.ppf(0.9995))
+        lo = min(lo, actual) - 1e-9
+        hi = max(hi, actual) + 1e-9
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            return float("nan")
+        grid = np.linspace(lo, hi, n_grid)
+        cdf = self.dist.cdf(grid)
+        step = (grid >= actual).astype(float)
+        return float(np.trapezoid((cdf - step) ** 2, grid))
+
+    def logpdf(self, actual: float) -> float:
+        return float(self.dist.logpdf(actual))
+
+
+class Model(Protocol):
+    name: str
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        """Predict the interval preceding `row` using only `history` (strictly earlier)."""
+        ...
+
+
+# Guard against degenerate fits producing absurd distributions.
+_MIN_SCALE = 1e-3
+
+
+class RollingMeanModel:
+    """Baseline approximating a GeyserTimes-style "mean +/- window" prediction.
+
+    The public dashboard shows a point prediction with a fixed-ish window; we
+    express that as a normal centered on the rolling mean with the rolling SD,
+    which is the fairest probabilistic reading of it.
+    """
+
+    name = "rolling_normal"
+
+    def __init__(self, window: int = 30) -> None:
+        self.window = window
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        x = history["interval_min"].to_numpy()[-self.window :]
+        if len(x) < 8:
+            return None
+        mu = float(np.mean(x))
+        sd = max(float(np.std(x, ddof=1)), _MIN_SCALE)
+        return Prediction(stats.norm(loc=mu, scale=sd), self.name)
+
+
+class LogNormalModel:
+    """Lognormal MLE on a rolling window of recent intervals."""
+
+    name = "lognormal"
+
+    def __init__(self, window: int = 100) -> None:
+        self.window = window
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        x = history["interval_min"].to_numpy()[-self.window :]
+        x = x[x > 0]
+        if len(x) < 12:
+            return None
+        logs = np.log(x)
+        mu = float(np.mean(logs))
+        sigma = max(float(np.std(logs, ddof=1)), _MIN_SCALE)
+        # scipy parameterization: s=sigma (shape), scale=exp(mu)
+        return Prediction(stats.lognorm(s=sigma, scale=np.exp(mu)), self.name)
+
+
+class WeibullModel:
+    """Weibull MLE on a rolling window (floc=0, i.e. two-parameter Weibull)."""
+
+    name = "weibull"
+
+    def __init__(self, window: int = 100) -> None:
+        self.window = window
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        x = history["interval_min"].to_numpy()[-self.window :]
+        x = x[x > 0]
+        if len(x) < 12:
+            return None
+        try:
+            c, loc, scale = stats.weibull_min.fit(x, floc=0)
+        except Exception:
+            return None
+        if not np.isfinite(c) or not np.isfinite(scale) or scale <= 0 or c <= 0:
+            return None
+        return Prediction(stats.weibull_min(c=c, loc=0, scale=scale), self.name)
+
+
+class BestParametricModel:
+    """Lognormal vs Weibull, chosen per prediction by held-out log-likelihood.
+
+    The most recent 25% of the training window is held out; both families are
+    fit on the earlier 75% and scored on the holdout, then the winner is refit
+    on the full window. This is the "pick better by held-out likelihood" step,
+    done online rather than once globally, so the choice can change over time.
+    """
+
+    name = "best_parametric"
+
+    def __init__(self, window: int = 150) -> None:
+        self.window = window
+        self._ln = LogNormalModel(window)
+        self._wb = WeibullModel(window)
+        self.choices: list[str] = []
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        x = history["interval_min"].to_numpy()[-self.window :]
+        x = x[x > 0]
+        if len(x) < 24:
+            return None
+        cut = int(len(x) * 0.75)
+        train, held = x[:cut], x[cut:]
+        if len(train) < 12 or len(held) < 4:
+            return None
+
+        def ll_lognorm(tr: np.ndarray, ho: np.ndarray) -> float:
+            logs = np.log(tr)
+            mu, sd = float(np.mean(logs)), max(float(np.std(logs, ddof=1)), _MIN_SCALE)
+            return float(np.sum(stats.lognorm.logpdf(ho, s=sd, scale=np.exp(mu))))
+
+        def ll_weibull(tr: np.ndarray, ho: np.ndarray) -> float:
+            try:
+                c, _, scale = stats.weibull_min.fit(tr, floc=0)
+                if not np.isfinite(c) or c <= 0 or scale <= 0:
+                    return -np.inf
+                return float(np.sum(stats.weibull_min.logpdf(ho, c=c, loc=0, scale=scale)))
+            except Exception:
+                return -np.inf
+
+        pick_ln = ll_lognorm(train, held) >= ll_weibull(train, held)
+        self.choices.append("lognormal" if pick_ln else "weibull")
+        chosen = self._ln if pick_ln else self._wb
+        pred = chosen.fit_predict(history, row)
+        if pred is None:
+            return None
+        return Prediction(pred.dist, self.name)
+
+
+class DurationConditionalModel:
+    """Old Faithful's classic duration -> interval relationship.
+
+    A short eruption (< ~2.5 min) empties less of the reservoir and is followed
+    by a much shorter interval than a long one. We fit a separate lognormal to
+    the short-preceding-duration and long-preceding-duration subsets of the
+    rolling window and pick by the *previous* eruption's duration. Falls back to
+    the pooled lognormal when duration is missing, which is common.
+    """
+
+    name = "duration_lognormal"
+
+    def __init__(self, window: int = 400, split_seconds: float = 150.0) -> None:
+        self.window = window
+        self.split_seconds = split_seconds
+
+    @staticmethod
+    def _lognorm_from(x: np.ndarray) -> stats.rv_continuous | None:
+        x = x[x > 0]
+        if len(x) < 12:
+            return None
+        logs = np.log(x)
+        sd = max(float(np.std(logs, ddof=1)), _MIN_SCALE)
+        return stats.lognorm(s=sd, scale=np.exp(float(np.mean(logs))))
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        h = history.tail(self.window)
+        if len(h) < 24:
+            return None
+        prev_dur = row.get("prev_duration_seconds")
+        pooled = self._lognorm_from(h["interval_min"].to_numpy())
+        if prev_dur is None or not np.isfinite(prev_dur) or prev_dur <= 0:
+            return Prediction(pooled, self.name) if pooled is not None else None
+
+        d = h["prev_duration_seconds"].to_numpy(dtype=float)
+        v = h["interval_min"].to_numpy(dtype=float)
+        mask = np.isfinite(d) & (d > 0)
+        if mask.sum() < 24:
+            return Prediction(pooled, self.name) if pooled is not None else None
+
+        want_short = float(prev_dur) < self.split_seconds
+        sub = v[mask & ((d < self.split_seconds) if want_short else (d >= self.split_seconds))]
+        dist = self._lognorm_from(sub) or pooled
+        return Prediction(dist, self.name) if dist is not None else None
+
+
+class WeibullAFTModel:
+    """Weibull AFT (lifelines) with covariates, refit periodically.
+
+    Covariates: previous interval, hour-of-day (sin/cos), day-of-year (sin/cos),
+    and the observation-quality flags. Refitting at every eruption would be far
+    too slow across a multi-year backtest, so the model is refit every
+    `refit_every` predictions and reused in between -- which is also how you'd
+    actually deploy it.
+    """
+
+    name = "weibull_aft"
+
+    COVARIATES = [
+        "prev_interval_min",
+        "hour_sin",
+        "hour_cos",
+        "doy_sin",
+        "doy_cos",
+        "webcam",
+        "electronic",
+        "approximate",
+        "in_eruption",
+    ]
+
+    def __init__(self, window: int = 1500, refit_every: int = 250) -> None:
+        self.window = window
+        self.refit_every = refit_every
+        self._fitter = None
+        self._since_refit = 10**9
+        self._cols: list[str] = []
+
+    @staticmethod
+    def _design(df: pd.DataFrame) -> pd.DataFrame:
+        out = pd.DataFrame(index=df.index)
+        out["prev_interval_min"] = pd.to_numeric(
+            df["prev_interval_min"], errors="coerce"
+        ).astype(float)
+        hour = pd.to_numeric(df["hour_local"], errors="coerce").fillna(12).astype(float)
+        out["hour_sin"] = np.sin(2 * np.pi * hour / 24.0)
+        out["hour_cos"] = np.cos(2 * np.pi * hour / 24.0)
+        doy = pd.to_datetime(df["ts_local"]).dt.dayofyear.astype(float)
+        out["doy_sin"] = np.sin(2 * np.pi * doy / 365.25)
+        out["doy_cos"] = np.cos(2 * np.pi * doy / 365.25)
+        for flag in ("webcam", "electronic", "approximate", "in_eruption"):
+            out[flag] = df[flag].astype(float)
+        return out
+
+    def _refit(self, history: pd.DataFrame) -> None:
+        from lifelines import WeibullAFTFitter
+
+        h = history.tail(self.window)
+        X = self._design(h)
+        X["_duration"] = h["interval_min"].astype(float).to_numpy()
+        X = X.replace([np.inf, -np.inf], np.nan).dropna()
+        X = X[X["_duration"] > 0]
+        # drop zero-variance covariates; lifelines will not converge with them
+        keep = [c for c in X.columns if c != "_duration" and X[c].std() > 1e-8]
+        if len(X) < 200 or not keep:
+            self._fitter = None
+            return
+        X = X[keep + ["_duration"]]
+        try:
+            f = WeibullAFTFitter(penalizer=0.01)
+            f.fit(X, duration_col="_duration")
+            self._fitter = f
+            self._cols = keep
+        except Exception:
+            self._fitter = None
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        if len(history) < 200:
+            return None
+        if self._since_refit >= self.refit_every:
+            self._refit(history)
+            self._since_refit = 0
+        self._since_refit += 1
+        if self._fitter is None:
+            return None
+
+        Xrow = self._design(row.to_frame().T)
+        Xrow = Xrow.reindex(columns=self._cols)
+        if Xrow.isna().any().any():
+            # fall back to the training medians for any missing covariate
+            Xrow = Xrow.fillna(self._fitter._norm_mean.reindex(self._cols))
+        if Xrow.isna().any().any():
+            return None
+        try:
+            lam, rho = self._fitter.predict_percentile, None  # noqa: F841
+            params = self._fitter.params_
+            # WeibullAFT: lambda_ = exp(X @ beta), rho_ = exp(intercept)
+            lam_lp = float(
+                sum(params[("lambda_", c)] * float(Xrow.iloc[0][c]) for c in self._cols)
+                + params[("lambda_", "Intercept")]
+            )
+            rho_lp = float(params[("rho_", "Intercept")])
+            scale = float(np.exp(lam_lp))
+            shape = float(np.exp(rho_lp))
+        except Exception:
+            return None
+        if not np.isfinite(scale) or not np.isfinite(shape) or scale <= 0 or shape <= 0:
+            return None
+        return Prediction(stats.weibull_min(c=shape, loc=0, scale=scale), self.name)
+
+
+def default_models(geyser: str) -> list[Model]:
+    """Model roster. Old Faithful additionally gets the duration-conditional model."""
+    models: list[Model] = [
+        RollingMeanModel(window=30),
+        LogNormalModel(window=100),
+        WeibullModel(window=100),
+        BestParametricModel(window=150),
+        WeibullAFTModel(window=1500, refit_every=250),
+    ]
+    if geyser == "Old Faithful":
+        models.append(DurationConditionalModel(window=400))
+    return models
