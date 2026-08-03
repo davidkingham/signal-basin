@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from .config import DB_PATH, TARGET_GEYSERS
-from .models import Model, default_models
+from .models import LogNormalModel, Model, default_models
 
 
 @dataclass
@@ -53,6 +53,94 @@ def load_intervals(geyser: str, db_path=DB_PATH) -> pd.DataFrame:
     finally:
         con.close()
     return df.reset_index(drop=True)
+
+
+def load_all_intervals(geyser: str, db_path=DB_PATH) -> pd.DataFrame:
+    """Every interval including filter-rejected ones, with `is_valid` retained.
+
+    Needed for two things the valid-only view cannot answer: estimating how
+    completely a geyser is being observed, and measuring honest coverage
+    against the intervals a filtered backtest quietly drops.
+    """
+    con = duckdb.connect(str(db_path), read_only=True)
+    try:
+        df = con.execute(
+            """
+            SELECT geyser, ts_utc, ts_local, epoch, interval_min, prev_interval_min,
+                   prev_duration_seconds, duration_seconds, hour_local, month_local,
+                   year_local, prev_hour_local, prev_doy,
+                   prev_webcam, prev_electronic, prev_approximate, prev_in_eruption,
+                   prev_minor, prev_major, minor, major,
+                   webcam, electronic, approximate, in_eruption, near_start, exact,
+                   med_interval, is_valid
+            FROM intervals
+            WHERE geyser = ?
+            ORDER BY epoch
+            """,
+            [geyser],
+        ).df()
+    finally:
+        con.close()
+    return df.reset_index(drop=True)
+
+
+def honest_coverage(
+    geyser: str, years: int = 3, min_train: int = 300, max_eval: int = 1500, db_path=DB_PATH
+) -> dict | None:
+    """Coverage measured against ALL intervals, not just filter-passing ones.
+
+    The headline backtest scores each model only on intervals that survived the
+    validity filter, which quietly excludes exactly the cases the filter exists
+    to remove: stretches where an eruption went unlogged. A gazer on the
+    boardwalk does not get that exemption. This re-scores the best simple model
+    on every interval in the window -- training still only on valid history --
+    so the gap between the two numbers is visible.
+    """
+    allv = load_all_intervals(geyser, db_path)
+    if len(allv) < min_train + 100:
+        return None
+    cutoff = pd.Timestamp(dt.date.today() - dt.timedelta(days=365 * years))
+    ts = pd.to_datetime(allv["ts_utc"]).dt.tz_localize(None)
+    start = max(int(np.searchsorted(ts.to_numpy(), cutoff.to_numpy())), min_train)
+    idx = list(range(start, len(allv)))
+    if not idx:
+        return None
+    if len(idx) > max_eval:
+        idx = sorted(set(np.linspace(start, len(allv) - 1, max_eval).astype(int)))
+
+    model = LogNormalModel(window=100)
+    in50 = in90 = n = 0
+    n_invalid = 0
+    for i in idx:
+        row = allv.iloc[i]
+        actual = float(row["interval_min"])
+        if not np.isfinite(actual) or actual <= 0:
+            continue
+        hist = allv.iloc[:i]
+        hist = hist[hist["is_valid"].astype(bool)]
+        if len(hist) < 50:
+            continue
+        try:
+            pred = model.fit_predict(hist, row)
+        except Exception:
+            pred = None
+        if pred is None:
+            continue
+        lo50, hi50 = pred.interval(0.50)
+        lo90, hi90 = pred.interval(0.90)
+        in50 += lo50 <= actual <= hi50
+        in90 += lo90 <= actual <= hi90
+        n += 1
+        n_invalid += not bool(row["is_valid"])
+    if n < 50:
+        return None
+    return {
+        "geyser": geyser,
+        "n": n,
+        "pct_filtered_out": 100.0 * n_invalid / n,
+        "cover50": in50 / n,
+        "cover90": in90 / n,
+    }
 
 
 def backtest_geyser(

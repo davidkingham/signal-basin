@@ -31,7 +31,7 @@ def backtest(
     years: int = typer.Option(3, "--years", help="Years of walk-forward evaluation."),
 ) -> None:
     """Run the walk-forward backtest and write reports/calibration_report.md."""
-    from .backtest import run_backtest
+    from .backtest import honest_coverage, run_backtest
     from .report import write_report
 
     if not DB_PATH.exists():
@@ -41,7 +41,22 @@ def backtest(
     if not scores:
         console.print("[red]No models scored — nothing to report.[/red]")
         raise typer.Exit(1)
-    path = write_report(scores, recs, years=years)
+
+    console.print("Scoring honest coverage against all intervals ...")
+    honest: dict[str, dict] = {}
+    for g in targets:
+        try:
+            hc = honest_coverage(g, years=years)
+        except Exception as exc:
+            console.print(f"  {g}: honest coverage failed ({exc})")
+            continue
+        if hc:
+            honest[g] = hc
+            console.print(
+                f"  {g:<16} n={hc['n']:>5,}  rejected={hc['pct_filtered_out']:4.1f}%  "
+                f"50%={hc['cover50']:.1%}  90%={hc['cover90']:.1%}"
+            )
+    path = write_report(scores, recs, years=years, honest=honest)
     console.print(f"\n[green]Wrote {path}[/green]")
 
 
@@ -68,26 +83,38 @@ def predict(
 
     t = Table(title="Next-eruption predictions", header_style="bold")
     t.add_column("Geyser")
-    t.add_column("Last eruption (local)")
+    t.add_column("Last logged (local)")
     t.add_column("Age (h)", justify="right")
+    t.add_column("Missed?", justify="right")
     t.add_column("Predicted", justify="left")
     t.add_column("50% window")
     t.add_column("90% window")
     for r in results:
+        missed = r["expected_missed_eruptions"]
+        missed_cell = f"[yellow]~{missed:.1f}[/yellow]" if r["data_is_stale"] else f"{missed:.1f}"
         t.add_row(
             r["geyser"],
             r["last_eruption_local"],
             f"{r['data_age_hours']:.1f}",
+            missed_cell,
             r["predicted_time_local"],
             f"{r['window_50_local'][0][11:]} – {r['window_50_local'][1][11:]}",
             f"{r['window_90_local'][0][11:]} – {r['window_90_local'][1][11:]}",
         )
     console.print(t)
+    stale = [r["geyser"] for r in results if r["data_is_stale"]]
     console.print(
-        f"[dim]Model: {results[0]['model']}. Times America/Denver. Predictions are "
-        "anchored to the last eruption present in the local archive snapshot — "
-        "check 'Age' before trusting them in the field.[/dim]"
+        f"[dim]Model: {results[0]['model']} + renewal adjustment. Times America/Denver.\n"
+        "'Missed?' is the expected number of eruptions that occurred but were never "
+        "logged during the silent window. Where it is above ~0.5 the archive snapshot "
+        "is stale rather than the geyser being overdue, and the prediction accounts "
+        "for that.[/dim]"
     )
+    if stale:
+        console.print(
+            f"[yellow]Stale data for: {', '.join(stale)} — these are renewal forecasts, "
+            "not 'it is due any minute now'.[/yellow]"
+        )
     print()
     print(jsonlib.dumps(results, indent=2))
 

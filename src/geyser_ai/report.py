@@ -25,6 +25,12 @@ MODEL_COLORS = {
     "best_parametric": "#eda100",
     "weibull_aft": "#e87ba4",
     "duration_lognormal": "#4a3aa7",
+    # slots 7-8 of the validated categorical order
+    "adaptive_lognormal": "#008300",
+    "minor_conditional": "#e34948",
+    # 9th series: no new hue is generated, this one reuses slot 1 at a darker
+    # step and is always direct-labelled in the legend.
+    "entry_conditional": "#184f95",
 }
 MODEL_ORDER = list(MODEL_COLORS)
 INK = "#1a1a19"
@@ -207,10 +213,15 @@ def _coverage_flag(actual: float, nominal: float) -> str:
 
 
 def write_report(
-    scores: list[ScoreRow], recs: pd.DataFrame, years: int, db_path=DB_PATH
+    scores: list[ScoreRow],
+    recs: pd.DataFrame,
+    years: int,
+    db_path=DB_PATH,
+    honest: dict[str, dict] | None = None,
 ) -> str:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    honest = honest or {}
 
     geysers = [g for g in TARGET_GEYSERS if any(s.geyser == g for s in scores)]
     figs = []
@@ -314,10 +325,38 @@ def write_report(
         )
 
     lines.append(
-        "\n- **Coverage here is measured only on intervals that passed the validity "
-        "filter.** In the field a model also has to survive the case where an eruption "
-        "was simply never logged, which these numbers do not capture. Treat them as an "
-        "upper bound on real-world reliability.\n"
+        "\n### Honest coverage: scoring the intervals the filter throws away\n"
+    )
+    lines.append(
+        "Everything above is measured only on intervals that passed the validity "
+        "filter, which quietly excludes exactly the cases the filter exists to remove — "
+        "stretches where an eruption went unlogged. A gazer on the boardwalk gets no "
+        "such exemption. The table below re-scores a plain rolling `lognormal` "
+        "(trained only on valid history, as always) against **every** interval in the "
+        "window, so the gap between the two numbers is the honest cost of observation "
+        "gaps.\n"
+    )
+    lines.append(
+        "\n| Geyser | n (all) | % filter-rejected | 50% cov | 90% cov | 90% cov (filtered) |"
+    )
+    lines.append("|---|---:|---:|---:|---:|---:|")
+    for g in geysers:
+        hc = honest.get(g)
+        if not hc:
+            continue
+        ln = next((s for s in scores if s.geyser == g and s.model == "lognormal"), None)
+        lines.append(
+            f"| {g} | {hc['n']:,} | {hc['pct_filtered_out']:.1f}% "
+            f"| {hc['cover50']:.1%} | {hc['cover90']:.1%} "
+            f"| {ln.cover90:.1%} |" if ln else
+            f"| {g} | {hc['n']:,} | {hc['pct_filtered_out']:.1f}% "
+            f"| {hc['cover50']:.1%} | {hc['cover90']:.1%} | n/a |"
+        )
+    lines.append(
+        "\nThe drop between the last two columns is the real-world penalty. Treat the "
+        "headline table as an upper bound on field reliability, and see the "
+        "renewal/missed-eruption handling in `predict` (README) for how the CLI "
+        "compensates at prediction time.\n"
     )
 
     lines.append("\n## Figures\n")

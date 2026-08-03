@@ -51,6 +51,35 @@ class Prediction:
         return float(self.dist.logpdf(actual))
 
 
+@dataclass(frozen=True)
+class SamplePrediction:
+    """A predictive distribution held as a weighted Monte Carlo sample.
+
+    Used where no closed form exists -- specifically the renewal/missed-eruption
+    forecast, which is a mixture over "how many eruptions went unlogged".
+    Exposes the same median/interval surface as `Prediction`.
+    """
+
+    samples: np.ndarray
+    weights: np.ndarray
+    model: str
+
+    def _q(self, q: float) -> float:
+        order = np.argsort(self.samples)
+        s, w = self.samples[order], self.weights[order]
+        cw = np.cumsum(w)
+        if cw[-1] <= 0:
+            return float("nan")
+        return float(np.interp(q, cw / cw[-1], s))
+
+    def median(self) -> float:
+        return self._q(0.5)
+
+    def interval(self, level: float) -> tuple[float, float]:
+        lo = (1.0 - level) / 2.0
+        return self._q(lo), self._q(1.0 - lo)
+
+
 class Model(Protocol):
     name: str
 
@@ -531,6 +560,83 @@ MINOR_MODE_GEYSERS = frozenset({"Castle", "Old Faithful"})
 # Geysers where electronic loggers supply enough entries for a per-entry-type
 # fit to have data on both sides of the split.
 LOGGER_HEAVY_GEYSERS = frozenset({"Great Fountain", "Daisy", "Castle", "Grand"})
+
+
+def renewal_forecast(
+    dist: stats.rv_continuous,
+    age_min: float,
+    p_obs: float,
+    n_sims: int = 40_000,
+    seed: int = 0,
+) -> tuple[SamplePrediction, float]:
+    """Distribution of the next eruption given nothing has been LOGGED for `age_min`.
+
+    The naive forecast conditions on survival -- "it has not erupted yet, so it
+    is overdue" -- which is only sound when we would certainly have seen it. In
+    crowdsourced data that assumption fails constantly: nobody watches Riverside
+    at 3am in February, and a silent 14 hours usually means nobody was looking,
+    not that the geyser held its breath.
+
+    So treat the geyser as a renewal process from the last logged eruption and
+    let each eruption be *logged* independently with probability `p_obs`. A path
+    on which k eruptions occurred inside the silent window is consistent with
+    what we know only if all k went unlogged, which carries weight
+    (1 - p_obs)^k. Weighting the simulated paths that way interpolates between
+    the two regimes automatically:
+
+      * fresh data (age << typical interval): almost no path has a missed
+        eruption, so this reduces to ordinary survival conditioning;
+      * stale data (age >> typical interval): survival paths are astronomically
+        unlikely, the weight shifts onto the k-missed hypotheses, and the
+        forecast correctly becomes "it probably already went, and the next one
+        is roughly one interval from whenever that was".
+
+    Returns the forecast (minutes after the last LOGGED eruption) and the
+    weighted expected number of missed eruptions.
+    """
+    rng = np.random.default_rng(seed)
+    # Cap p_obs: at exactly 1.0 every stale-data path gets zero weight and the
+    # forecast degenerates. 0.995 keeps survival dominant without collapsing.
+    p_obs = float(min(max(p_obs, 0.05), 0.995))
+
+    # Draw generously; paths need enough intervals to cross `age_min`.
+    med = float(dist.ppf(0.5))
+    max_steps = int(np.clip(age_min / max(med, 1e-6) + 6, 3, 200))
+    draws = dist.rvs(size=(n_sims, max_steps), random_state=rng)
+    draws = np.clip(np.nan_to_num(draws, nan=med), 1e-6, None)
+
+    cum = np.cumsum(draws, axis=1)
+    # k = eruptions that fell inside the silent window (these were missed)
+    k = (cum < age_min).sum(axis=1)
+    ok = k < max_steps
+    if not ok.any():
+        k = np.minimum(k, max_steps - 1)
+        ok = np.ones_like(k, dtype=bool)
+    next_time = cum[np.arange(n_sims), np.minimum(k, max_steps - 1)]
+
+    log_w = k * np.log1p(-p_obs)
+    log_w -= log_w.max()
+    w = np.exp(log_w) * ok
+    if w.sum() <= 0:
+        w = np.ones_like(w)
+    exp_missed = float(np.sum(w * k) / np.sum(w))
+    return SamplePrediction(next_time, w, "renewal"), exp_missed
+
+
+def observation_completeness(history: pd.DataFrame, lookback: int = 400) -> float:
+    """Estimate the probability that an eruption actually gets logged.
+
+    Uses the recent share of consecutive gaps that came through the validity
+    filter as a single primary interval. A stretch where most gaps are doubles
+    is a stretch where most eruptions went unlogged, so this is a direct read on
+    observation coverage rather than a tuned constant.
+    """
+    if "is_valid" not in history.columns or history.empty:
+        return 0.9
+    recent = history.tail(lookback)["is_valid"].astype(bool)
+    if len(recent) < 20:
+        return 0.9
+    return float(np.clip(recent.mean(), 0.3, 0.995))
 
 
 def default_models(geyser: str) -> list[Model]:

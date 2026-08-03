@@ -8,9 +8,9 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from .backtest import load_intervals
+from .backtest import load_all_intervals, load_intervals
 from .config import DB_PATH, TARGET_GEYSERS
-from .models import default_models
+from .models import default_models, observation_completeness, renewal_forecast
 
 
 def _last_eruption(geyser: str, db_path=DB_PATH) -> pd.Series | None:
@@ -68,9 +68,6 @@ def predict_geyser(geyser: str, model_name: str | None = None, db_path=DB_PATH) 
     last_ts = pd.to_datetime(last["ts_utc"])
     if last_ts.tzinfo is None:
         last_ts = last_ts.tz_localize("UTC")
-    med = pred.median()
-    lo50, hi50 = pred.interval(0.50)
-    lo90, hi90 = pred.interval(0.90)
 
     def at(minutes: float) -> str:
         return (last_ts + pd.Timedelta(minutes=float(minutes))).tz_convert(
@@ -78,6 +75,24 @@ def predict_geyser(geyser: str, model_name: str | None = None, db_path=DB_PATH) 
         ).strftime("%Y-%m-%d %H:%M %Z")
 
     now = pd.Timestamp.now(tz="UTC")
+    age_min = float((now - last_ts).total_seconds()) / 60.0
+
+    # Naive forecast: the raw fitted interval distribution, which implicitly
+    # assumes the last logged eruption really was the last eruption.
+    naive_med = pred.median()
+    naive50 = pred.interval(0.50)
+    naive90 = pred.interval(0.90)
+
+    # Renewal forecast: folds in the possibility that eruptions went unlogged
+    # during the silent window. Reduces to the naive answer on fresh data.
+    p_obs = observation_completeness(load_all_intervals(geyser, db_path))
+    rpred, exp_missed = renewal_forecast(pred.dist, max(age_min, 0.0), p_obs)
+    med = rpred.median()
+    lo50, hi50 = rpred.interval(0.50)
+    lo90, hi90 = rpred.interval(0.90)
+
+    # Flag the regime so the caller knows which answer they are looking at.
+    stale = exp_missed >= 0.5
     return {
         "geyser": geyser,
         "model": chosen,
@@ -85,14 +100,21 @@ def predict_geyser(geyser: str, model_name: str | None = None, db_path=DB_PATH) 
         "last_eruption_local": last_ts.tz_convert("America/Denver").strftime(
             "%Y-%m-%d %H:%M %Z"
         ),
-        "data_age_hours": round(float((now - last_ts).total_seconds()) / 3600.0, 1),
+        "data_age_hours": round(age_min / 60.0, 1),
         "n_training_intervals": int(len(hist)),
+        "observation_completeness": round(p_obs, 3),
+        "expected_missed_eruptions": round(exp_missed, 2),
+        "data_is_stale": bool(stale),
         "median_interval_min": round(med, 1),
         "interval_50_min": [round(lo50, 1), round(hi50, 1)],
         "interval_90_min": [round(lo90, 1), round(hi90, 1)],
         "predicted_time_local": at(med),
         "window_50_local": [at(lo50), at(hi50)],
         "window_90_local": [at(lo90), at(hi90)],
+        # kept for comparison: what you'd get ignoring possible missed eruptions
+        "naive_median_interval_min": round(naive_med, 1),
+        "naive_interval_50_min": [round(naive50[0], 1), round(naive50[1], 1)],
+        "naive_interval_90_min": [round(naive90[0], 1), round(naive90[1], 1)],
     }
 
 
