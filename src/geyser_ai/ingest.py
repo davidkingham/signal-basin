@@ -45,6 +45,9 @@ from .config import (
 # turned out to matter far more than the multipliers themselves.
 INTERVAL_MIN_MULT = 0.5
 INTERVAL_MAX_MULT = 1.75
+# Rows a regime needs before it gets its own validity baseline. Below this the
+# geyser almost certainly has no real minor mode, just a few stray flags.
+MIN_REGIME_ROWS = 200
 
 
 def _archive_url(version: str) -> str:
@@ -358,16 +361,50 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
         -- tracks a drifting interval far better than a trailing one. It is
         -- smooth and slowly-varying, so it carries no meaningful information
         -- about any individual interval.
+        -- STAGE 3: REGIME. Castle breaks the assumption underneath stages 1
+        -- and 2, which is that a geyser has ONE interval distribution to be
+        -- local about. Castle has two: an eruption that fails to reach the
+        -- steam phase is logged as a MINOR, and the interval that follows it
+        -- is a genuinely different, much shorter process. Pooled, the baseline
+        -- tracks the ~1000-minute post-major mode, the floor lands at 500
+        -- minutes, and every short post-minor interval is deleted as if it
+        -- were a duplicate entry -- 103 of them under 400 minutes, not one
+        -- surviving. The model is then taught that a minor is followed by a
+        -- LONGER wait than a major, which is the opposite of the truth.
+        --
+        -- So the baseline is computed per regime where there is enough of a
+        -- regime to compute one. `prev_minor` is false for essentially every
+        -- row of a geyser without minors, which makes this a no-op for the
+        -- other six, and the row-count guard stops a handful of stray minor
+        -- flags from producing a baseline out of nothing.
+        regime AS (
+            SELECT *, COALESCE(prev_minor, false) AS regime_minor
+            FROM raw_int
+            WHERE interval_min > 0
+        ),
+        regime_sized AS (
+            SELECT *, count(*) OVER (PARTITION BY geyser, regime_minor) AS regime_n
+            FROM regime
+        ),
         base_anchor AS (
             SELECT *,
                    quantile_cont(interval_min, 0.25) OVER (
                        PARTITION BY geyser ORDER BY epoch
                        ROWS BETWEEN 400 PRECEDING AND 400 FOLLOWING
-                   ) AS base0
-            FROM raw_int
-            WHERE interval_min > 0
+                   ) AS base0_pooled,
+                   quantile_cont(interval_min, 0.25) OVER (
+                       PARTITION BY geyser, regime_minor ORDER BY epoch
+                       ROWS BETWEEN 400 PRECEDING AND 400 FOLLOWING
+                   ) AS base0_regime
+            FROM regime_sized
         ),
-        local_med AS (
+        base_pick AS (
+            SELECT *,
+                   CASE WHEN regime_n >= {MIN_REGIME_ROWS}
+                        THEN base0_regime ELSE base0_pooled END AS base0
+            FROM base_anchor
+        ),
+        med_both AS (
             SELECT *,
                    median(
                        CASE WHEN interval_min BETWEEN 0.55 * base0 AND 1.4 * base0
@@ -375,8 +412,21 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
                    ) OVER (
                        PARTITION BY geyser ORDER BY epoch
                        ROWS BETWEEN 300 PRECEDING AND 300 FOLLOWING
-                   ) AS med_interval
-            FROM base_anchor
+                   ) AS med_pooled,
+                   median(
+                       CASE WHEN interval_min BETWEEN 0.55 * base0 AND 1.4 * base0
+                            THEN interval_min END
+                   ) OVER (
+                       PARTITION BY geyser, regime_minor ORDER BY epoch
+                       ROWS BETWEEN 300 PRECEDING AND 300 FOLLOWING
+                   ) AS med_regime
+            FROM base_pick
+        ),
+        local_med AS (
+            SELECT *,
+                   CASE WHEN regime_n >= {MIN_REGIME_ROWS}
+                        THEN med_regime ELSE med_pooled END AS med_interval
+            FROM med_both
         )
         SELECT
             r.eruption_id, r.geyser, r.ts_utc, r.ts_local, r.epoch,

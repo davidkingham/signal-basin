@@ -100,7 +100,12 @@ def stats(geyser: str | None = Query(None)) -> dict:
 
 @app.get("/api/scoreboard")
 def scoreboard(
-    days: float = Query(30.0, ge=1, le=365, description="Rolling window to score over."),
+    days: float = Query(
+        30.0,
+        ge=1,
+        le=36500,
+        description="Rolling window to score over. Any large value means 'everything logged'.",
+    ),
     geyser: str | None = Query(None, description="Optional single-geyser filter."),
 ) -> dict:
     """How this project, the NPS and Geysers.net have actually done, per geyser.
@@ -114,10 +119,25 @@ def scoreboard(
 @app.get("/api/comparisons/recent")
 def comparisons_recent(
     limit: int = Query(20, ge=1, le=200),
+    offset: int = Query(0, ge=0, description="Page through the filtered set."),
+    day: str | None = Query(
+        None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="A single park-local day, YYYY-MM-DD. Omit for the most recent.",
+    ),
     geyser: str | None = Query(None, description="Optional single-geyser filter."),
 ) -> dict:
-    """The most recent scored eruptions, with every source's prediction beside the actual."""
-    return get_recent_comparisons(limit=limit, geyser=_resolve(geyser) if geyser else None)
+    """Scored eruptions with every source's prediction beside the actual.
+
+    `available_days` lists every park-local day the ledger holds, newest first,
+    so a date picker can be built from one response.
+    """
+    return get_recent_comparisons(
+        limit=limit,
+        offset=offset,
+        day=day,
+        geyser=_resolve(geyser) if geyser else None,
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

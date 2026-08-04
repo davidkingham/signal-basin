@@ -43,6 +43,10 @@
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
+/* Form controls follow the page's theme, not just the OS's, so the day
+   picker's own dropdown cannot come back white on a dark page. */
+:root[data-theme=light]{color-scheme:light}
+:root[data-theme=dark]{color-scheme:dark}
 @media (prefers-color-scheme:dark){
   :root:not([data-theme=light]){
     --surface:#04252b; --card:#0a3138; --line:#12454e;
@@ -255,7 +259,12 @@ h2 .h2note{
   border-left:1px solid color-mix(in srgb,var(--src) 55%,transparent);
   border-right:1px solid color-mix(in srgb,var(--src) 55%,transparent);}
 .plot-zero{position:absolute;top:0;bottom:0;left:50%;width:1px;background:var(--ink-3)}
-.plot-zero.actual{width:1.5px;background:var(--ink);top:-1px;bottom:-1px}
+/* The actual eruption is the one fixed fact a comparison row is built around,
+   and it sits at the same x in every lane — so it is drawn heavier than a mere
+   origin and wears the page's single warm accent, the same language as NOW.
+   It is never colour-alone: the axis names it, in the same hue, directly below. */
+.plot-zero.actual{width:2px;margin-left:-1px;top:-3px;bottom:-3px;border-radius:1px;
+  background:var(--mat)}
 .plot-bar{position:absolute;top:50%;height:2px;margin-top:-1px;border-radius:1px;
   background:var(--src)}
 .plot-cap{position:absolute;top:50%;height:9px;width:2px;margin-top:-4.5px;
@@ -263,8 +272,6 @@ h2 .h2note{
 .plot-dot{position:absolute;top:50%;width:9px;height:9px;margin-top:-4.5px;
   margin-left:-4.5px;border-radius:50%;background:var(--src);
   box-shadow:0 0 0 2px var(--card)}
-/* the eruption itself is a fact, not a source's opinion — so it wears ink */
-.plot-dot.actual{background:var(--ink)}
 .sb-stats{gap:2px 12px;margin-top:2px}
 /* the width never breaks away from the rate it qualifies */
 .sb-stats i{font-style:normal;color:var(--ink-3);white-space:nowrap}
@@ -273,6 +280,8 @@ h2 .h2note{
   color:var(--ink-3);font-variant-numeric:tabular-nums;margin-top:6px}
 .plot-axis span:nth-child(2){text-align:center}
 .plot-axis span:last-child{text-align:right}
+/* the centre label names what zero is, in the colour zero is drawn in */
+.plot-axis .ref{color:var(--mat);font-weight:700}
 
 /* recent scored eruptions */
 .cmp{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
@@ -291,6 +300,43 @@ h2 .h2note{
 .cl-nums .lead{color:var(--ink-3)}
 .cl-nums .verdict{letter-spacing:.06em;text-transform:uppercase;font-size:9.5px;
   color:var(--ink-3);align-self:center}
+
+/* ── controls ───────────────────────────────────────────────
+   The same pill vocabulary as the flag chips, but these ones act.
+   Chosen is teal + bold + aria-pressed, never hue alone. Targets are
+   ~28px tall so they are tappable, and one filter row sits above the
+   thing it scopes rather than inside any card.
+   ───────────────────────────────────────────────────────── */
+.ctl{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:9px 0 2px}
+.ctl-lab{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);flex:none}
+.ctl-note{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);
+  font-variant-numeric:tabular-nums;text-align:center;flex:1 1 auto}
+.btn{
+  font-family:var(--mono);font-size:11px;letter-spacing:.05em;
+  background:none;border:1px solid var(--line);color:var(--ink-2);
+  padding:5px 10px;border-radius:99px;cursor:pointer;line-height:1.3;
+}
+.btn:hover:not(:disabled){border-color:var(--ink-3);color:var(--ink)}
+.btn:focus-visible{outline:2px solid var(--pool-500);outline-offset:2px}
+.btn[aria-pressed=true]{
+  border-color:var(--brand);color:var(--brand);font-weight:700;
+  background:color-mix(in srgb,var(--brand) 10%,transparent);
+}
+.btn:disabled{opacity:.38;cursor:default}
+/* the day picker is a native select — it scales to a season of days and a
+   phone already knows how to present it — wearing the chip's clothes */
+select.btn{
+  appearance:none;-webkit-appearance:none;color:var(--ink);
+  padding-right:23px;max-width:100%;
+  background-image:
+    linear-gradient(45deg,transparent 50%,currentColor 50%),
+    linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-size:4px 4px,4px 4px;
+  background-position:calc(100% - 14px) calc(50% + 1px),calc(100% - 10px) calc(50% + 1px);
+  background-repeat:no-repeat;
+}
+.empty .ctl{justify-content:center;margin-top:11px}
 
 /* a scoreboard with nothing in it yet is a state, not a failure */
 .empty{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
@@ -340,20 +386,31 @@ h2 .h2note{
   <p class="note">
     Three predictors, each scored against the window <em>it</em> stated — and those
     windows are not the same size, so every in-window rate is shown with the width
-    it was earned on. Each plot is centred on the prediction: the shaded band is the
-    stated window, the bar is the typical miss, the dot is which way it leans.
-    Right of centre means the eruption ran <b>late</b>.
+    it was earned on. These are aggregates over many eruptions, so there is no single
+    actual to measure from: each plot is centred on that source's own prediction, the
+    shaded band is the stated window, the bar is the typical miss, the dot is which
+    way it leans. Right of centre means the eruption ran <b>late</b>.
   </p>
+  <div class="ctl" id="sb-ctl" role="group" aria-label="Scoreboard window">
+    <span class="ctl-lab">Window</span>
+    <button class="btn" type="button" data-days="7" aria-pressed="false">7 days</button>
+    <button class="btn" type="button" data-days="30" aria-pressed="true">30 days</button>
+    <button class="btn" type="button" data-days="36500" aria-pressed="false">all</button>
+  </div>
   <div id="sb-key"></div>
   <div id="sb-rows"><div class="empty skel"><div class="empty-t">loading scoreboard…</div></div></div>
 
   <div id="cmp-block">
     <h2>Last scored eruptions</h2>
     <p class="note">
-      One row per logged eruption, one plot per source. Each plot is centred on that
-      source's own prediction, the band is the window it stated, and the dark dot is
-      where the eruption actually landed — inside the band or not.
+      One row per logged eruption, one plot per source, all three on one scale. The
+      orange line is the eruption itself, at the same place in every lane: a source's
+      dot is the time it actually said, its band is the window it stated around that,
+      and the gap back to the line is how far it missed. Left of the line predicted
+      <b>early</b>, right of it <b>late</b>.
     </p>
+    <div class="ctl" id="cmp-ctl"></div>
+    <div class="ctl" id="cmp-page" hidden></div>
     <div id="cmp-rows"></div>
   </div>
 
@@ -655,20 +712,41 @@ async function load(){
 }
 
 /* ── scoreboard ─────────────────────────────────────────────
-   Everything in this section lives in one frame: the centre line
-   is the prediction, right of it means the eruption ran late, and
-   the shaded band is the window that source stated for itself.
-   The scoreboard plot is the aggregate of the comparison plots,
-   so the two read as the same picture at two zoom levels.
+   Two frames, and the difference matters enough to be stated on
+   the page as well as here.
+
+   A comparison row is about ONE eruption, so the origin is that
+   eruption: zero is the moment the geyser actually went, identical
+   in all three lanes, and every source's window is drawn where it
+   really sat around it. Widths are therefore comparable *and* so
+   are positions.
+
+   A scoreboard row aggregates many eruptions and has no single
+   actual to point at, so it stays centred on each source's own
+   prediction and the axis says exactly that.
+
+   In both, one linear span is computed across the whole card and
+   handed to every lane in it — that is what makes a 24-minute
+   window render as a quarter of a 93-minute one. Nothing here may
+   scale a lane to itself.
    ───────────────────────────────────────────────────────── */
-const SCORE_DAYS = 30;
 const CMP_LIMIT  = 12;
+const SB_ALL_DAYS = 36500;   // the API's ceiling: "everything logged"
 const LOW_N      = 5;     // below this a rate is noise, and is labelled as such
 const SRC_FALLBACK = [
   {key:"geyser_ai",   label:"Geyser AI",   window_label:"90%"},
   {key:"nps",         label:"NPS",         window_label:"stated"},
   {key:"geysers_net", label:"Geysers.net", window_label:"stated"}
 ];
+
+/* What the reader has chosen. Held here rather than read back off the DOM so
+   the five-minute refresh redraws the selection it was already showing instead
+   of snapping everyone back to the defaults mid-scroll. */
+let sbDays    = 30;      // scoreboard aggregation window
+let cmpDay    = null;    // park-local YYYY-MM-DD, or null for "most recent"
+let cmpOffset = 0;       // paging into the filtered set
+let sbSources = SRC_FALLBACK;
+let cmpCtlSig = null;    // rebuild the day picker only when the days change
 
 const esc = s => String(s == null ? "" : s)
   .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -708,7 +786,9 @@ function plot(span, o){
     h += `<span class="plot-band" style="left:${a.toFixed(2)}%;width:${
       Math.max(b-a, 0.8).toFixed(2)}%"></span>`;
   }
-  h += `<span class="plot-zero"></span>`;
+  // Zero is drawn over the band and under the marks. What zero *means* is the
+  // caller's to say — a prediction, or the eruption that actually happened.
+  h += `<span class="plot-zero${o.zero ? " " + o.zero : ""}"></span>`;
   if (o.bar){
     const a = pos(Math.min(o.bar[0],o.bar[1]), span), b = pos(Math.max(o.bar[0],o.bar[1]), span);
     h += `<span class="plot-bar" style="left:${a.toFixed(2)}%;width:${(b-a).toFixed(2)}%"></span>`;
@@ -716,15 +796,16 @@ function plot(span, o){
       h += `<span class="plot-cap" style="left:${x.toFixed(2)}%"></span>`);
   }
   if (o.dot != null){
-    h += `<span class="plot-dot${o.actual ? " actual" : ""}" style="left:${
-      pos(o.dot, span).toFixed(2)}%"></span>`;
+    h += `<span class="plot-dot" style="left:${pos(o.dot, span).toFixed(2)}%"></span>`;
   }
   return `<div class="plot" role="img" aria-label="${esc(o.label||"")}" title="${
     esc(o.label||"")}">${h}</div>`;
 }
-const axis = (span, centre) =>
-  `<div class="plot-axis"><span>-${span} min</span><span>${centre
-   }</span><span>+${span} min</span></div>`;
+/* The axis states its units on both ends and names its origin in the middle,
+   because "which zero is this" is the only question these plots can get wrong. */
+const axis = (span, centre, cls) =>
+  `<div class="plot-axis"><span>−${span} min</span><span${cls ? ` class="${cls}"` : ""
+   }>${centre}</span><span>+${span} min</span></div>`;
 
 /* ── source key (also the legend — identity is never colour alone) ── */
 function renderKey(sources){
@@ -826,7 +907,7 @@ function sbCard(row, sources){
         <span class="sb-erupt">${n} eruption${n === 1 ? "" : "s"} logged</span>
       </div>
       ${sources.map(m => sbSource(m, row.by_source ? row.by_source[m.key] : null, span)).join("")}
-      ${drawn ? axis(span, "prediction") : ""}
+      ${drawn ? axis(span, "each source's own prediction") : ""}
     </article>`;
 }
 
@@ -867,16 +948,34 @@ function winOffsets(s){
   return null;
 }
 
+/* Where a source's prediction sat relative to the eruption, in minutes.
+   `signed_error_min` is actual − predicted, so a prediction that came early is
+   a positive error and sits at −e: to the left, earlier on the axis. Falling
+   back to the timestamps keeps a lane drawable if the error is ever missing. */
+function predOffset(c, s){
+  if (s.signed_error_min != null) return -s.signed_error_min;
+  const a = Date.parse(c.actual_utc), p = Date.parse(s.predicted_utc);
+  return (!isNaN(a) && !isNaN(p)) ? (p - a) / 60000 : null;
+}
+
 function cmpCard(c, sources){
+  // One eruption, so one origin for the whole card: x = 0 is the moment the
+  // geyser actually went. A source's window is drawn where it really sat around
+  // that moment — its own offsets carried out to the prediction's position —
+  // which is what lets you read both how wide each window was and whether it
+  // was even pointed at the right time.
   let span = 5;
   const lanes = sources.map(meta => {
     const s = c.sources ? c.sources[meta.key] : null;
     if (!s) return {meta, s:null};
-    const win = winOffsets(s);
-    if (s.signed_error_min != null) span = Math.max(span, Math.abs(s.signed_error_min));
+    const off = predOffset(c, s);
+    const w   = winOffsets(s);
+    const win = (w && off != null) ? [off + w[0], off + w[1]] : null;
+    if (off != null) span = Math.max(span, Math.abs(off));
     if (win) span = Math.max(span, Math.abs(win[0]), Math.abs(win[1]));
-    return {meta, s, win};
+    return {meta, s, off, win};
   });
+  // One span, computed across every lane, handed to all of them unchanged.
   span = niceSpan(span * 1.15);
 
   const rows = lanes.map(L => {
@@ -888,26 +987,35 @@ function cmpCard(c, sources){
       return head + `<span class="cl-nums"><span class="lead">no prediction</span>`
         + `</span></div></div>`;
     }
-    const e = L.s.signed_error_min;
+    // The numbers describe the prediction's position, in the same words as the
+    // picture: a dot left of the line is a prediction that came early.
+    const off = L.off;
     const nums = [];
     if (L.s.predicted_local) nums.push(`<span>said ${esc(L.s.predicted_local)}</span>`);
-    if (e != null) nums.push(`<span class="miss">${sgn(e)} min ${dirWord(e)}</span>`);
+    if (off != null)
+      nums.push(`<span class="miss">${num(Math.abs(off))} min ${
+        off < 0 ? "early" : off > 0 ? "late" : "exact"}</span>`);
     nums.push(`<span class="verdict">${L.s.in_window ? "in window" : "outside window"}</span>`);
     if (L.s.lead_minutes != null)
       nums.push(`<span class="lead">${leadText(L.s.lead_minutes)} ahead</span>`);
 
     const label = `${L.meta.label} said ${L.s.predicted_local || "—"}`
-      + (L.s.window_width_min != null ? `, a ${num(L.s.window_width_min)} min window` : "")
-      + (e != null ? `; the eruption ran ${num(Math.abs(e))} min ${dirWord(e)}` : "")
-      + `, ${L.s.in_window ? "inside" : "outside"} that window`
+      + (off != null
+          ? `, ${num(Math.abs(off))} min ${off < 0 ? "before" : "after"} the eruption` : "")
+      + (L.win
+          ? `; its ${L.s.window_width_min != null ? num(L.s.window_width_min) + " min " : ""
+             }window ran from ${sgn(L.win[0])} to ${sgn(L.win[1])} min around the eruption`
+          : "")
+      + `; the eruption fell ${L.s.in_window ? "inside" : "outside"} that window`
       + (L.s.detail ? ` (${L.s.detail})` : "");
 
     return head + `<span class="cl-nums">${nums.join("")}</span></div>`
       + plot(span, {
           band: L.win,
-          bar:  e != null ? [0, e] : null,
-          dot:  e,
-          actual: true,
+          // the miss, drawn as the gap between where it said and what happened
+          bar:  off != null ? [0, off] : null,
+          dot:  off,
+          zero: "actual",
           label
         })
       + `</div>`;
@@ -921,25 +1029,93 @@ function cmpCard(c, sources){
         <span class="cmp-when">erupted ${esc(c.actual_local || "")}${ago ? " · " + ago : ""}</span>
       </div>
       ${rows}
-      ${axis(span, "each prediction")}
+      ${axis(span, "actual eruption", "ref")}
     </article>`;
 }
 
 function renderComparisons(d, sources){
   const host = document.getElementById("cmp-rows");
-  const items = (d.comparisons || []).slice(0, CMP_LIMIT);
+  const items = d.comparisons || [];
+  const filtered = !!cmpDay || cmpOffset > 0;
   // One designed empty state is a statement; two stacked is a broken page, so
-  // this block stands down entirely while the scoreboard above says the same thing.
-  document.getElementById("cmp-block").hidden = !items.length && sbEmpty;
+  // this block stands down entirely while the scoreboard above says the same
+  // thing — but never while a filter is on, or there would be no way back.
+  document.getElementById("cmp-block").hidden = !items.length && sbEmpty && !filtered;
   if (!items.length){
     host.innerHTML = `<div class="empty">
-        <div class="empty-t">Nothing scored yet</div>
-        <div class="empty-b">Every logged eruption closes whichever predictions were
-        open for it. The first comparison lands here as soon as one does.</div>
+        <div class="empty-t">${filtered ? "Nothing here" : "Nothing scored yet"}</div>
+        <div class="empty-b">${filtered
+          ? "No scored eruptions for this selection."
+          : `Every logged eruption closes whichever predictions were open for it.
+             The first comparison lands here as soon as one does.`}</div>
+        ${filtered ? `<div class="ctl"><button class="btn" type="button"
+          id="cmp-reset">show most recent</button></div>` : ""}
       </div>`;
+    const reset = document.getElementById("cmp-reset");
+    if (reset) reset.addEventListener("click", () => {
+      cmpDay = null; cmpOffset = 0; loadComparisons();
+    });
     return;
   }
   host.innerHTML = items.map(c => cmpCard(c, sources)).join("");
+}
+
+/* ── choosing a day, and paging through it ───────────────────
+   `available_days` describes the whole ledger whatever filter is
+   on, so the picker is built from the same response as the rows
+   and never needs a second request. A native select rather than a
+   row of chips because a season of gazing is a lot of days and a
+   phone already knows how to present one; it wears the chip's
+   clothes so the vocabulary stays the page's own.                 */
+function dayLabel(iso){
+  // Fixed at local noon so the calendar date can't slip a day either way.
+  const d = new Date(iso + "T12:00:00");
+  if (isNaN(d)) return iso;
+  return new Intl.DateTimeFormat("en-US",
+    {weekday:"short", month:"short", day:"numeric"}).format(d);
+}
+
+function renderCmpCtl(d){
+  const host = document.getElementById("cmp-ctl");
+  const days = d.available_days || [];
+  // Rebuilding a <select> the reader may have open is rude, so it is only
+  // rewritten when the days themselves, or the choice, actually changed.
+  const sig = days.map(x => x.date + ":" + x.n_eruptions).join("|") + "#" + (cmpDay || "");
+  if (sig !== cmpCtlSig){
+    cmpCtlSig = sig;
+    if (!days.length){ host.innerHTML = ""; host.hidden = true; }
+    else {
+      host.hidden = false;
+      const all = days.reduce((a,x) => a + (x.n_eruptions || 0), 0);
+      host.innerHTML = `<label class="ctl-lab" for="cmp-day">Day</label>`
+        + `<select class="btn" id="cmp-day">`
+        + `<option value=""${cmpDay ? "" : " selected"}>most recent · ${all
+            } eruption${all === 1 ? "" : "s"}</option>`
+        + days.map(x => `<option value="${esc(x.date)}"${x.date === cmpDay ? " selected" : ""
+            }>${esc(dayLabel(x.date))} · ${x.n_eruptions} eruption${
+            x.n_eruptions === 1 ? "" : "s"}</option>`).join("")
+        + `</select>`;
+      document.getElementById("cmp-day").addEventListener("change", ev => {
+        cmpDay = ev.target.value || null;
+        cmpOffset = 0;             // a new day starts at its newest eruption
+        loadComparisons();
+      });
+    }
+  }
+
+  const page  = document.getElementById("cmp-page");
+  const total = d.total || 0, off = d.offset || 0, n = (d.comparisons || []).length;
+  if (!off && total <= (d.limit || CMP_LIMIT)){ page.innerHTML = ""; page.hidden = true; return; }
+  page.hidden = false;
+  page.innerHTML =
+      `<button class="btn" type="button" id="cmp-prev"${off <= 0 ? " disabled" : ""
+        }>‹ newer</button>`
+    + `<span class="ctl-note">${n ? `${off+1}–${off+n}` : "none"} of ${total}</span>`
+    + `<button class="btn" type="button" id="cmp-next"${d.has_more ? "" : " disabled"
+        }>older ›</button>`;
+  const step = k => { cmpOffset = Math.max(0, cmpOffset + k * CMP_LIMIT); loadComparisons(); };
+  document.getElementById("cmp-prev").addEventListener("click", () => step(-1));
+  document.getElementById("cmp-next").addEventListener("click", () => step(1));
 }
 
 /* ── methodology, on the page rather than in the README ─── */
@@ -953,22 +1129,62 @@ function renderMethod(d){
   document.getElementById("sb-method").innerHTML = bits.join("<br><br>");
 }
 
-/* ── load (strictly additive: this section can fail alone) ── */
+/* ── the window note, which must not overclaim ───────────────
+   `since_utc` comes back clamped to when logging actually started,
+   so asking for a year of a two-day-old ledger answers with two
+   days. The heading is written from that, never from the number
+   that was requested — the page says what it has, not what it
+   asked for.                                                      */
+function coverText(ms){
+  const h = ms / 3600e3;
+  if (h < 1.5) return `${Math.max(1, Math.round(ms/60000))} min`;
+  if (h < 48)  return `${Math.round(h)} hour${Math.round(h) === 1 ? "" : "s"}`;
+  const d = Math.round(h/24);
+  return `${d} day${d === 1 ? "" : "s"}`;
+}
+
+function renderWindowNote(sb){
+  const el = document.getElementById("sb-window");
+  const since = sb.since_utc ? Date.parse(sb.since_utc) : NaN;
+  if (isNaN(since)){ el.textContent = sbDays >= SB_ALL_DAYS ? "all time" : `last ${sbDays} days`; return; }
+  const started = sb.logging_started_utc ? Date.parse(sb.logging_started_utc) : NaN;
+  // Within a minute of the start of logging means the window was clamped: this
+  // is not "the last 30 days", it is everything there is.
+  const clamped = !isNaN(started) && Math.abs(since - started) < 60000;
+  const when = new Intl.DateTimeFormat("en-US",{timeZone:"America/Denver",
+    month:"short", day:"numeric", hour:"2-digit", minute:"2-digit", hour12:false}
+  ).format(new Date(since));
+  el.textContent = (clamped ? "everything logged · " : "")
+    + `${coverText(Date.now() - since)} · since ${when}`;
+}
+
+function renderSbCtl(){
+  document.querySelectorAll("#sb-ctl button[data-days]").forEach(b =>
+    b.setAttribute("aria-pressed", String(Number(b.dataset.days) === sbDays)));
+}
+document.getElementById("sb-ctl").addEventListener("click", ev => {
+  const b = ev.target.closest("button[data-days]");
+  if (!b) return;
+  sbDays = Number(b.dataset.days);
+  renderSbCtl();                    // answer the tap before the network does
+  loadScoreboard();
+});
+
+/* ── load (strictly additive: this section can fail alone) ───
+   The two halves are fetched separately so that changing a day
+   does not re-pull the aggregates, changing the window does not
+   reset the reader's page, and either endpoint can fail without
+   taking the other — or the prediction cards above — with it.     */
+const jsonOk = r => { if (!r.ok) throw new Error(r.status); return r.json(); };
+
 async function loadScoreboard(){
   try{
-    const j = r => { if (!r.ok) throw new Error(r.status); return r.json(); };
-    const [sb, cmp] = await Promise.all([
-      fetch(`/api/scoreboard?days=${SCORE_DAYS}`).then(j),
-      fetch(`/api/comparisons/recent?limit=${CMP_LIMIT}`).then(j)
-    ]);
-    const sources = (sb && sb.sources && sb.sources.length) ? sb.sources : SRC_FALLBACK;
-    renderKey(sources);
-    document.getElementById("sb-window").textContent =
-      `last ${sb.window_days || SCORE_DAYS} days` + (sb.since_utc ? ` · since ${
-        new Intl.DateTimeFormat("en-US",{timeZone:"America/Denver",month:"short",
-          day:"numeric"}).format(new Date(sb.since_utc))}` : "");
-    renderScoreboard(sb, sources);
-    renderComparisons(cmp, sources);
+    const sb = await fetch(`/api/scoreboard?days=${sbDays}`).then(jsonOk);
+    sbSources = (sb && sb.sources && sb.sources.length) ? sb.sources : SRC_FALLBACK;
+    renderSbCtl();
+    renderKey(sbSources);
+    renderWindowNote(sb);
+    renderScoreboard(sb, sbSources);
     renderMethod(sb);
   }catch(err){
     // Hold whatever is already drawn rather than flashing an empty card.
@@ -979,10 +1195,37 @@ async function loadScoreboard(){
           <div class="empty-b">The predictions above are unaffected — the scoring
           service just isn't answering right now.</div>
         </div>`;
-      document.getElementById("cmp-block").hidden = true;
     }
   }
 }
+
+async function loadComparisons(again){
+  try{
+    const q = new URLSearchParams({limit:CMP_LIMIT, offset:cmpOffset});
+    if (cmpDay) q.set("day", cmpDay);
+    const cmp = await fetch(`/api/comparisons/recent?${q}`).then(jsonOk);
+
+    // A selection can go stale under an auto-refresh — the ledger is rewritten
+    // by the scoring job, not by us. If the chosen day is gone, or the page is
+    // now past the end, fall back to the newest rather than showing a void.
+    const days = cmp.available_days || [];
+    const stale = (cmpDay && !days.some(x => x.date === cmpDay))
+      || (cmpOffset > 0 && !cmp.count);
+    if (stale && !again){
+      cmpDay = null; cmpOffset = 0;
+      return loadComparisons(true);
+    }
+    renderCmpCtl(cmp);
+    renderComparisons(cmp, sbSources);
+  }catch(err){
+    const host = document.getElementById("cmp-rows");
+    if (host && !host.querySelector(".cmp")) document.getElementById("cmp-block").hidden = true;
+  }
+}
+
+/* Aggregates first, only because they carry the source list the comparison
+   lanes are drawn with; a failure there still leaves the comparisons to load. */
+async function loadScored(){ await loadScoreboard(); await loadComparisons(); }
 
 /* ── theme toggle (auto by default) ─────────────────────── */
 document.getElementById("theme").addEventListener("click", () => {
@@ -995,7 +1238,7 @@ document.getElementById("theme").addEventListener("click", () => {
 
 /* The scoreboard is fetched alongside the predictions but never through them:
    if the scoring endpoints are missing or broken the cards still render. */
-function refresh(){ load(); loadScoreboard(); }
+function refresh(){ load(); loadScored(); }
 
 parkClock();
 setInterval(parkClock, 1000);

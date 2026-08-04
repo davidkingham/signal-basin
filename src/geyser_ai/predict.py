@@ -8,7 +8,12 @@ import pandas as pd
 
 from .backtest import load_intervals
 from .config import DB_PATH, TARGET_GEYSERS
-from .models import default_models, fit_tail_mixture, renewal_forecast
+from .models import (
+    default_model_name,
+    default_models,
+    fit_tail_mixture,
+    renewal_forecast,
+)
 from .observation import observation_completeness_at
 
 
@@ -74,9 +79,10 @@ def predict_geyser(
     """Predict the next interval for `geyser` from its most recent eruption.
 
     The whole valid history is the training set and the last recorded eruption is
-    the anchor. `model_name` selects a specific model; by default we use
-    `best_parametric`, which is the roster's per-prediction lognormal/Weibull
-    chooser.
+    the anchor. `model_name` selects a specific model; by default each geyser
+    gets whichever model the walk-forward backtest actually favours, which is
+    `best_parametric` everywhere except the two geysers with a real minor mode.
+    See `models.BEST_MODEL_BY_GEYSER`.
     """
     hist = load_intervals(geyser, db_path)
     if len(hist) < 50:
@@ -110,7 +116,7 @@ def predict_geyser(
     )
 
     models = {m.name: m for m in default_models(geyser)}
-    chosen = model_name or "best_parametric"
+    chosen = model_name or default_model_name(geyser)
     model = models.get(chosen)
     if model is None:
         raise ValueError(f"Unknown model {chosen!r}. Available: {sorted(models)}")

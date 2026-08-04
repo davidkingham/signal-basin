@@ -455,6 +455,52 @@ class TestScoreboardEndpoints:
         assert grand["awaiting_first_eruption"] is True
         assert rows["Beehive"]["by_source"]["nps"] is None
 
+    def test_days_are_offered_before_the_day_filter_narrows_them(self):
+        """Selecting a day must not leave the picker with only that day in it."""
+        led = ledger_mod.get_ledger()
+        for i, offset in enumerate((0, 30 * HOUR)):
+            when = NOW + HOUR - offset
+            led.apply(
+                match_and_score(
+                    # Issued before the eruption it is about, or nothing matches.
+                    [pred("nps", key=f"k{i}", geyser="Daisy", issued=when - HOUR, predicted=when)],
+                    [erupt(geyser="Daisy", eid=100 + i, epoch=when)],
+                    NOW + 2 * HOUR,
+                )
+            )
+        days = client.get("/api/comparisons/recent").json()["available_days"]
+        assert len(days) == 2, "two calendar days of eruptions"
+
+        one = client.get(f"/api/comparisons/recent?day={days[0]['date']}").json()
+        assert one["total"] == 1
+        assert len(one["available_days"]) == 2, "the picker still offers both days"
+
+    def test_paging_reports_where_it_is(self):
+        led = ledger_mod.get_ledger()
+        for i in range(5):
+            when = NOW + (i + 1) * HOUR
+            led.apply(
+                match_and_score(
+                    [pred("nps", key=f"p{i}", geyser="Grand", issued=when - HOUR, predicted=when)],
+                    [erupt(geyser="Grand", eid=200 + i, epoch=when)],
+                    NOW + 10 * HOUR,
+                )
+            )
+        first = client.get("/api/comparisons/recent?limit=2").json()
+        assert (first["total"], first["count"], first["has_more"]) == (5, 2, True)
+
+        last = client.get("/api/comparisons/recent?limit=2&offset=4").json()
+        assert (last["count"], last["has_more"]) == (1, False)
+
+        seen = {c["eruption_id"] for c in first["comparisons"]}
+        assert not seen & {c["eruption_id"] for c in last["comparisons"]}, "pages must not overlap"
+
+    def test_a_window_longer_than_the_ledger_does_not_claim_to_cover_it(self):
+        d = client.get("/api/scoreboard?days=36500").json()
+        assert d["since_utc"] >= d["logging_started_utc"], (
+            "must never claim to cover time before logging began"
+        )
+
     def test_an_unknown_geyser_filter_is_rejected(self):
         assert client.get("/api/scoreboard?geyser=Nope").status_code == 404
         assert client.get("/api/comparisons/recent?geyser=Nope").status_code == 404

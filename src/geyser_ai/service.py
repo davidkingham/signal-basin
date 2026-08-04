@@ -594,10 +594,20 @@ def get_scoreboard(days: float = 30.0, geyser: str | None = None) -> dict[str, A
             }
         )
 
+    # Never claim to cover time before the ledger existed: "last 365 days" on a
+    # two-day-old ledger is two days of data, and the page should say so.
+    since = dt.datetime.fromtimestamp(cutoff, tz=dt.UTC)
+    if led.started_utc:
+        try:
+            started = dt.datetime.fromisoformat(led.started_utc)
+            since = max(since, started)
+        except ValueError:
+            pass
+
     return {
         "generated_utc": now.isoformat(),
         "window_days": days,
-        "since_utc": dt.datetime.fromtimestamp(cutoff, tz=dt.UTC).isoformat(),
+        "since_utc": since.isoformat(),
         "logging_started_utc": led.started_utc,
         "sources": sources,
         "rows": rows,
@@ -606,8 +616,22 @@ def get_scoreboard(days: float = 30.0, geyser: str | None = None) -> dict[str, A
     }
 
 
-def get_recent_comparisons(limit: int = 20, geyser: str | None = None) -> dict[str, Any]:
-    """The last `limit` scored eruptions, with what each source had said."""
+def _park_day(epoch: int) -> str:
+    return pd.Timestamp(epoch, unit="s", tz="UTC").tz_convert(PARK_TZ).strftime("%Y-%m-%d")
+
+
+def get_recent_comparisons(
+    limit: int = 20,
+    geyser: str | None = None,
+    day: str | None = None,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Scored eruptions with what each source had said, newest first.
+
+    `day` selects a single park-local calendar day (YYYY-MM-DD); `offset` pages
+    through whatever the filters leave. `available_days` always describes the
+    whole ledger, so a date picker can be built without a second request.
+    """
     led = get_ledger()
     scored = [s for s in led.scored if not geyser or s.geyser == geyser]
 
@@ -615,9 +639,26 @@ def get_recent_comparisons(limit: int = 20, geyser: str | None = None) -> dict[s
     for row in scored:
         by_eruption.setdefault(row.eruption_id, []).append(row)
 
-    ordered = sorted(
-        by_eruption.items(), key=lambda kv: max(r.actual_epoch for r in kv[1]), reverse=True
-    )[:limit]
+    def actual_of(rows: list[Any]) -> int:
+        return max(r.actual_epoch for r in rows)
+
+    # Days are offered before the day filter is applied, or selecting one would
+    # leave the picker with a single option.
+    day_counts: dict[str, int] = {}
+    for rows in by_eruption.values():
+        day_counts[_park_day(actual_of(rows))] = day_counts.get(_park_day(actual_of(rows)), 0) + 1
+    available_days = [
+        {"date": d, "n_eruptions": n} for d, n in sorted(day_counts.items(), reverse=True)
+    ]
+
+    selected = list(by_eruption.items())
+    if day:
+        selected = [kv for kv in selected if _park_day(actual_of(kv[1])) == day]
+
+    total = len(selected)
+    ordered = sorted(selected, key=lambda kv: actual_of(kv[1]), reverse=True)[
+        offset : offset + limit
+    ]
 
     def local(epoch: int, fmt: str) -> str:
         return pd.Timestamp(epoch, unit="s", tz="UTC").tz_convert(PARK_TZ).strftime(fmt)
@@ -677,6 +718,12 @@ def get_recent_comparisons(limit: int = 20, geyser: str | None = None) -> dict[s
     return {
         "generated_utc": dt.datetime.now(dt.UTC).isoformat(),
         "count": len(comparisons),
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(comparisons) < total,
+        "day": day,
+        "available_days": available_days,
         "logging_started_utc": led.started_utc,
         "comparisons": comparisons,
     }

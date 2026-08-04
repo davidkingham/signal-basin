@@ -89,6 +89,15 @@ const MAX_REFRESH_TARGETS = 6;
 /** Beyond this the cached answer is too old to serve; recompute and make them wait. */
 const MAX_STALE_MS = 10 * 60_000;
 
+/**
+ * The unconditional ledger tick. The host is arbitrary -- the container is
+ * reached through the Durable Object, not DNS -- but the path is not: this
+ * endpoint is what generates a forecast, logs it, pulls the third-party
+ * predictions and scores whatever has erupted.
+ */
+const LEDGER_TICK_URL = "http://geyser-ai.internal/api/predictions";
+const LEDGER_TICK_KEY = `${CACHE_VERSION}:ledger-tick`;
+
 function freshnessFor(pathname: string): number | null {
   if (pathname === "/api/predictions" || pathname.startsWith("/api/predictions/")) {
     return 60_000;
@@ -360,17 +369,42 @@ export default {
   },
 
   /**
-   * Recompute whatever readers have been asking for, off the request path.
+   * Drive the scoreboard, and warm whatever readers have been asking for.
    *
-   * Only endpoints read in the last ten minutes are refreshed, so an unvisited
-   * site does no work at all: nothing touches the container, `sleepAfter`
-   * expires, and it scales to zero. Targets are refreshed one at a time --
-   * there is only a quarter of a vCPU to go round.
+   * The ledger tick is unconditional. Predictions can only be scored against
+   * eruptions that have already happened, so a scoreboard that only advanced
+   * while somebody was watching would have permanent holes exactly where the
+   * park is quietest -- and the comparison against the NPS and Geysers.net
+   * would be drawn from a biased sample of the day. One `/api/predictions` run
+   * generates this project's forecast, logs it, pulls every open third-party
+   * prediction and scores anything that has erupted since, so a single call
+   * covers all of it. That keeps the container awake around the clock, which
+   * is a deliberate cost trade rather than an accident.
+   *
+   * GeyserTimes sees no more traffic for this: both the eruption sync and the
+   * predictions feed are behind their own five-minute TTLs, which is why this
+   * runs on the same five-minute cadence rather than faster.
+   *
+   * Everything after the tick is response-cache warming, and that stays
+   * visitor-gated -- there is no point recomputing a dashboard shape nobody
+   * has asked for in ten minutes.
    */
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     const stub = getContainer(env.GEYSER_CONTAINER, SINGLETON);
-    const targets = await stub.refreshTargets();
-    if (targets.length === 0) return;
+    const warm = await stub.refreshTargets();
+
+    // A visitor-driven refresh of the prediction endpoint already does the
+    // ledger's work, so don't pay for it twice.
+    const alreadyPredicts = warm.some((t) => {
+      try {
+        return new URL(t.url).pathname === "/api/predictions";
+      } catch {
+        return false;
+      }
+    });
+    const targets = alreadyPredicts
+      ? warm
+      : [{ key: LEDGER_TICK_KEY, url: LEDGER_TICK_URL }, ...warm];
 
     for (const target of targets) {
       try {

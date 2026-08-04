@@ -65,10 +65,12 @@ built on top of it.
 **Interval validity.** This is crowdsourced data with real observation gaps —
 nobody is watching Riverside at 3 a.m. in February — so a raw gap between
 consecutive entries is often several eruption cycles rather than one. An
-interval is marked `is_valid` only when it falls within **0.35×–3× that geyser's
-own median**, computed per geyser. The upper bound drops missed eruptions, the
-lower bound drops duplicate entries. About 82% of intervals survive, and the raw
-value is retained so the thresholds can be revisited.
+interval is marked `is_valid` only when it falls within **0.5×–1.75× a local,
+regime-specific baseline** for that geyser. The upper bound drops missed
+eruptions, the lower bound drops duplicate entries. About 75% of intervals
+survive, and the raw value is retained so the thresholds can be revisited. The
+four things that baseline has to survive are in
+[What actually moved the numbers](#what-actually-moved-the-numbers).
 
 **Observation flags** (`webcam`, `electronic`, `approximate`, `in_eruption`,
 `near_start`, …) are preserved as columns so models can use or exclude them.
@@ -103,17 +105,24 @@ is better):
 
 | Geyser | Best model | CRPS | MAE | 50% cov | 90% cov |
 |---|---|---:|---:|---:|---:|
-| Old Faithful | `minor_conditional` | 4.5 | 6.1 | 59% | 94% |
-| Grand | `adaptive_lognormal` | 38.7 | 54.1 | 48% | 91% |
-| Daisy | `adaptive_lognormal` | 3.1 | 4.3 | 52% | 87% |
+| Old Faithful | `minor_conditional` | 4.5 | 6.1 | 59% | 93% |
+| Grand | `adaptive_lognormal` | 38.8 | 54.2 | 48% | 91% |
+| Daisy | `adaptive_lognormal` | 3.1 | 4.3 | 52% | 89% |
 | Riverside | `adaptive_lognormal` | 12.8 | 17.5 | 53% | 91% |
-| Castle | `minor_conditional` | 110.5 | 151.6 | 59% | 88% |
+| Castle | `minor_conditional` | 77.2 | 101.2 | 61% | 87% |
 | Great Fountain | `lognormal` | 45.6 | 62.9 | 55% | 91% |
-| Beehive | `rolling_normal` | 121.0 | 167.6 | 51% | 87% |
+| Beehive | `rolling_normal` | 120.4 | 166.9 | 52% | 87% |
+
+**Each geyser is served by the model in that table**, not by a single global
+default — see `models.BEST_MODEL_BY_GEYSER`. That distinction is only load-bearing
+for the two geysers with a minor mode, where conditioning on it roughly halves
+CRPS (Old Faithful 8.8 → 4.5, Castle 172.5 → 77.2 against `best_parametric`).
+On the other five the winner beats `best_parametric` by 0.2–4.8%, which is inside
+the noise, so they keep the default rather than pinning a choice on a coin flip.
 
 ### What actually moved the numbers
 
-**Data cleaning beat modeling, repeatedly.** Three successive fixes to the interval
+**Data cleaning beat modeling, repeatedly.** Four successive fixes to the interval
 validity filter each produced larger gains than any model ever did.
 
 *1. Harmonics.* The first version used a 3x-median ceiling. Interval histograms
@@ -137,15 +146,48 @@ true mode, then the median is recomputed over only the gaps near that anchor.
 Post-filter p95/median (≈1.2-1.5 is clean unimodal, ≈2 means harmonics survived):
 Great Fountain 2.01 -> 1.28, Beehive 1.59 -> 1.52, Grand 1.46 -> 1.40.
 
+*4. Two processes, one baseline.* Every fix above assumes a geyser has **one**
+interval distribution to be local about. Castle does not. An eruption that fails
+to reach the steam phase is logged as a **minor**, and the interval that follows
+it is a physically different, much shorter process. Pooled, the baseline tracked
+the ~1000-minute post-major mode, so the 0.5× floor landed at ~500 minutes and
+deleted the entire short mode as if it were duplicate entries: **103 post-minor
+intervals under 400 minutes, not one of them surviving.** The training data then
+claimed a minor is followed by a *longer* wait than a major, which is the
+opposite of the truth.
+
+The fix computes the baseline per regime — separately for post-minor and
+post-major anchors — wherever a geyser has enough of a regime to compute one.
+`prev_minor` is false for essentially every row of the other five geysers, so it
+is a no-op there, and a row-count guard stops a handful of stray flags earning a
+baseline out of nothing. Five geysers came through bit-identical; Old Faithful
+gained 135 intervals out of 165,000 and did not move.
+
+What it did to Castle:
+
+| | post-minor median (valid) | post-minor n<400 min kept | `minor_conditional` CRPS | honest 90% coverage |
+|---|---:|---:|---:|---:|
+| before | 1000 min | 0 / 103 | 110.5 | 60.5% |
+| after | 375 min | 101 / 103 | **77.2** | **73.2%** |
+
+The model's two branches went from 1028 vs 1078 minutes — indistinguishable — to
+371 vs 1081. Note also that every *unconditional* model on Castle got markedly
+worse (`best_parametric` 120 -> 172), which is the correct result rather than a
+regression: the bimodality is now visible in the data, so a model that refuses to
+condition on the minor flag is finally being charged for it. That is also why the
+earlier claim here that Castle's minor gain was "in variance rather than
+location" was wrong — the flat location difference was an artifact of the filter,
+not the physics.
+
 **The minor-eruption flag is the single best covariate found.** For Old Faithful the
 post-minor and post-major interval distributions are almost disjoint — median 70 min
 (p95 83) versus median 102 min (p05 91) — and 22% of recent eruptions are minors.
-Conditioning on it roughly halves CRPS (8.3 -> 4.5) and beats the classic
+Conditioning on it roughly halves CRPS (8.8 -> 4.5) and beats the classic
 duration-based split, because the observer-set flag is cleaner than raw duration
-data, which is often missing. For Castle the gain is in *variance* rather than
-location (post-minor sd 387 vs 164), and `minor_conditional` is its best model.
-Both are legitimate: the flag is recorded when the eruption is logged, so it is
-known at prediction time.
+data, which is often missing. For Castle the effect is larger still once the
+filter stops hiding it — 172.5 -> 77.2, a 3x separation in the branch medians —
+and `minor_conditional` is what actually serves both geysers. The flag is
+recorded when the eruption is logged, so it is known at prediction time.
 
 **The lifelines covariate model still does not earn its complexity.** `weibull_aft`
 remains in the bottom half on essentially every geyser. Its early apparent win on
@@ -229,16 +271,18 @@ no such exemption. Re-scoring a plain rolling `lognormal` against **every** inte
 
 | Geyser | % filter-rejected | 50% cov | 90% cov | 90% cov (filtered) |
 |---|---:|---:|---:|---:|
-| Old Faithful | 15.0% | 47% | 76% | 90% |
-| Grand | 17.9% | 39% | 76% | 91% |
-| Daisy | 21.9% | 41% | 69% | 89% |
-| Riverside | 36.5% | 37% | 59% | 92% |
-| Castle | 30.6% | 46% | 61% | 87% |
+| Old Faithful | 14.0% | 46% | 76% | 93% |
+| Grand | 19.3% | 38% | 74% | 91% |
+| Daisy | 21.4% | 43% | 70% | 89% |
+| Riverside | 37.2% | 36% | 58% | 91% |
+| Castle | 30.0% | 51% | 73% | 87% |
 | Great Fountain | 43.5% | 31% | 52% | 91% |
 | Beehive | 8.2% | 47% | 80% | 87% |
 
 The gap between the last two columns is the real-world cost of observation gaps.
-Treat the headline table as an upper bound on field reliability.
+Treat the headline table as an upper bound on field reliability. Castle is the
+one row where that gap has meaningfully closed (90% coverage 61% -> 73%), because
+the regime-aware baseline stopped throwing away the intervals it was worst at.
 
 ### Missed eruptions at prediction time
 
@@ -494,13 +538,27 @@ Rather than change any modelling code, the Worker keeps the last computed
 response in the container's Durable Object storage and recomputes it off the
 request path:
 
-- a reader is served the cached answer in **under 100 ms**;
-- a cron trigger every two minutes recomputes whichever endpoints have actually
-  been read in the last ten minutes, so an unvisited site does no work at all,
-  nothing touches the container, and it scales to zero;
+- a reader is served the cached answer in **under 200 ms**;
 - past ten minutes of staleness the Worker stops trusting the cron and
   recomputes on the request, so nobody is ever handed a stale prediction;
 - `/api/health` is never cached — it is the honest freshness probe.
+
+The five-minute cron does two different jobs. The **ledger tick is
+unconditional**: predictions can only be scored against eruptions that have
+already happened, so a scoreboard that advanced only while somebody was watching
+would have permanent holes exactly where the park is quietest, and the
+comparison against the NPS and Geysers.net would be drawn from a biased sample of
+the day. One `/api/predictions` run generates the forecast, logs it, pulls every
+open third-party prediction and scores whatever has erupted, so a single call
+covers all of it. **Response-cache warming stays visitor-gated** — there is no
+point recomputing a dashboard shape nobody has asked for.
+
+That keeps the container awake permanently, which is a deliberate trade. At
+`basic` the standing cost is memory and disk rather than CPU: roughly
+**$8/month** on top of the $5 Workers Paid plan (≈$6.35 memory, ≈$0.85 CPU,
+≈$0.69 disk, after the included 25 GiB-hours, 375 vCPU-minutes and 200 GB-hours).
+Halving the cron cadence would roughly double the CPU line and leave the rest
+alone, which is why it runs at five minutes and not two.
 
 Served responses carry `x-geyser-cache: hit|stale|miss` and `x-geyser-cache-age`
 so the freshness is inspectable rather than implied.
@@ -511,9 +569,9 @@ so the freshness is inspectable rather than implied.
 |---|---|---|
 | `instance_type` | `basic` (1/4 vCPU, 1 GiB, 4 GB disk) | Peak RSS is ~450 MB and the snapshot ~200 MB; larger instances bought no speed |
 | `max_instances` | 1 | One sync timer, one poll rate against GeyserTimes |
-| `sleepAfter` | 30m | Scales to zero when nobody is watching |
-| cron | `*/2 * * * *` | Recomputes the cache, but only while the site is being read |
-| R2 bucket | `geyser-ai-snapshots` | Holds `geysertimes.duckdb` |
+| `sleepAfter` | 30m | Survives a skipped cron without a cold start |
+| cron | `*/5 * * * *` | Drives the ledger around the clock; matches the sync TTL |
+| R2 bucket | `geyser-ai-snapshots` | Holds `geysertimes.duckdb` and the ledger |
 
 ### Deploying
 
@@ -529,11 +587,11 @@ available on the free plan. Container rollouts are gradual, so for a minute or
 two after a deploy some requests can hit the previous version.
 
 **Caveats.** A cold start costs a container boot plus a ~200 MB snapshot
-download, then one uncached prediction run, so the first visit after an idle
-period is slow; everything after it is instant. Refreshing the archive means
-re-running `ingest` and `publish-snapshot.sh`; running containers pick up the new
-snapshot on their next cold start. For realistic traffic the whole thing sits
-inside the Workers Paid plan's included container allowance.
+download, then one uncached prediction run — but with the cron running around
+the clock, cold starts should only happen after a deploy. Refreshing the archive
+means re-running `ingest` and `publish-snapshot.sh`; running containers pick up
+the new snapshot on their next cold start, so **a change to the ingest SQL is not
+live until the snapshot is republished**.
 
 ## Data attribution and gentle use
 

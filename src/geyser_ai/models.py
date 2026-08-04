@@ -578,6 +578,35 @@ class WeibullAFTModel:
 # conditional model would just be a slower copy of `lognormal`.
 MINOR_MODE_GEYSERS = frozenset({"Castle", "Old Faithful"})
 
+# Which model actually serves each geyser.
+#
+# `best_parametric` is the right default -- it picks lognormal against Weibull
+# per prediction by held-out likelihood, and on five of the seven geysers the
+# walk-forward winner beats it by 0.2-4.8%, which is inside the noise and not
+# worth pinning a choice on.
+#
+# The two exceptions are not close. Both geysers with a real minor mode are
+# roughly twice as well predicted by conditioning on it, because the interval
+# following a minor is a different process rather than a noisy draw from the
+# same one:
+#
+#     Old Faithful  minor_conditional CRPS 4.51  vs best_parametric 8.78   (-49%)
+#     Castle        minor_conditional CRPS 77.2  vs best_parametric 172.5  (-55%)
+#
+# Serving `best_parametric` everywhere quietly threw that away. Regenerate the
+# evidence with `uv run geyser-ai backtest`; the table lives in
+# reports/calibration_report.md.
+BEST_MODEL_BY_GEYSER: dict[str, str] = {
+    "Old Faithful": "minor_conditional",
+    "Castle": "minor_conditional",
+}
+
+
+def default_model_name(geyser: str) -> str:
+    """The model a prediction uses when the caller does not name one."""
+    return BEST_MODEL_BY_GEYSER.get(geyser, "best_parametric")
+
+
 # Geysers where electronic loggers supply enough entries for a per-entry-type
 # fit to have data on both sides of the split.
 LOGGER_HEAVY_GEYSERS = frozenset({"Great Fountain", "Daisy", "Castle", "Grand"})

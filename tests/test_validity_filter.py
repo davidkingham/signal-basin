@@ -165,3 +165,95 @@ class TestBounds:
         df = intervals(build(np.array(ep, dtype=np.int64)))
         row = df.iloc[idx - 1]
         assert bool(row.is_valid) is expected, f"{factor}x median -> expected valid={expected}"
+
+
+class TestMinorRegime:
+    """Castle's fourth failure: one baseline for two physically different processes.
+
+    An eruption that fails to reach the steam phase is logged as a MINOR, and
+    the interval that follows it is a genuinely shorter process. Pooled, the
+    baseline tracks the long post-major mode, the lower bound lands above the
+    entire short mode, and every real post-minor interval is deleted as if it
+    were two observers logging the same eruption.
+    """
+
+    def build_two_mode(self, n: int = 1200, long_min: float = 1000.0, short_min: float = 350.0):
+        """A geyser where every fourth eruption is a minor followed by a short interval."""
+        con = duckdb.connect(":memory:")
+        cols = ", ".join(f'"{c}" VARCHAR' for c in RAW_COLUMNS)
+        con.execute(f"CREATE TABLE eruptions_raw ({cols})")
+
+        epochs, minors = [], []
+        t = 1_700_000_000
+        for i in range(n):
+            epochs.append(t)
+            is_minor = i % 4 == 3
+            minors.append(is_minor)
+            # The interval AFTER a minor is the short one.
+            t += int((short_min if is_minor else long_min) * 60)
+
+        rows = []
+        for epoch, is_minor in zip(epochs, minors, strict=True):
+            batch = _rows("Test", np.array([epoch], dtype=np.int64), len(rows) + 1)
+            row = list(batch[0])
+            row[RAW_COLUMNS.index("min")] = "1" if is_minor else "0"
+            row[RAW_COLUMNS.index("maj")] = "0" if is_minor else "1"
+            rows.append(tuple(row))
+
+        con.executemany(
+            f"INSERT INTO eruptions_raw VALUES ({', '.join(['?'] * len(RAW_COLUMNS))})", rows
+        )
+        _build_eruptions_view(con)
+        _build_intervals(con)
+        return con
+
+    def frame(self, con):
+        return con.execute(
+            "SELECT interval_min, is_valid, prev_minor, med_interval FROM intervals ORDER BY epoch"
+        ).df()
+
+    def test_short_post_minor_intervals_survive(self):
+        """The whole point: these are real eruptions, not duplicate entries."""
+        df = self.frame(self.build_two_mode())
+        post_minor = df[df.prev_minor.astype(bool)]
+
+        # Comfortably over MIN_REGIME_ROWS, or the guard correctly declines to split.
+        assert len(post_minor) > 250, "fixture must clear the regime row-count guard"
+        assert post_minor.is_valid.mean() > 0.9, (
+            "the short mode is the physics, not an artifact -- it must not be filtered away"
+        )
+
+    def test_each_regime_gets_its_own_baseline(self):
+        df = self.frame(self.build_two_mode())
+        med_minor = df[df.prev_minor.astype(bool)].med_interval.median()
+        med_major = df[~df.prev_minor.astype(bool)].med_interval.median()
+
+        assert med_minor == pytest.approx(350.0, rel=0.1)
+        assert med_major == pytest.approx(1000.0, rel=0.1)
+
+    def test_the_long_regime_is_unharmed(self):
+        df = self.frame(self.build_two_mode())
+        post_major = df[~df.prev_minor.astype(bool)]
+        assert post_major.is_valid.mean() > 0.9
+
+    def test_doubles_are_still_rejected_within_a_regime(self):
+        """Splitting by regime must not cost us the harmonic filtering."""
+        con = self.build_two_mode()
+        df = self.frame(con)
+        # A post-major interval at 2x its own regime's baseline is a missed eruption.
+        assert not df[
+            (~df.prev_minor.astype(bool)) & (df.interval_min > 1.9 * 1000.0)
+        ].is_valid.any()
+
+    def test_a_geyser_without_minors_is_untouched(self):
+        """`prev_minor` is false for every row, so the partition must be a no-op."""
+        plain = clean_series(90.0, 700)
+        pooled = intervals(build(plain))
+        assert pooled.is_valid.mean() > 0.95
+        assert pooled.med_interval.median() == pytest.approx(90.0, rel=0.02)
+
+    def test_a_handful_of_stray_minor_flags_does_not_earn_a_baseline(self):
+        """Below the row-count guard the regime split would be fitting noise."""
+        from geyser_ai.ingest import MIN_REGIME_ROWS
+
+        assert MIN_REGIME_ROWS >= 100

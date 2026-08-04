@@ -5,10 +5,12 @@
   "compatibility_date": "2026-08-03",
   "compatibility_flags": ["nodejs_compat"],
 
-  // Recomputes the cached prediction endpoints off the request path, but only
-  // while somebody is actually reading them -- see `scheduled` in worker/index.ts.
+  // Drives the scoreboard ledger around the clock and warms the response cache.
+  // Five minutes matches the GeyserTimes sync TTL, so nothing upstream is asked
+  // for more often than it is willing to answer -- see `scheduled` in
+  // worker/index.ts. This keeps the container awake permanently, on purpose.
   "triggers": {
-    "crons": ["*/2 * * * *"]
+    "crons": ["*/5 * * * *"]
   },
 
   "observability": {
