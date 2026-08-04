@@ -26,6 +26,16 @@ export { ContainerProxy };
 const SNAPSHOT_HOST = "geyser-snapshot.r2";
 const SNAPSHOT_KEY = "geysertimes.duckdb";
 
+/**
+ * The container may write only under this prefix. The scoreboard ledger has to
+ * survive restarts and the container's disk does not, so it PUTs the ledger
+ * back through the same virtual host it reads the snapshot from -- but a bug in
+ * the app must not be able to overwrite the 200 MB eruption archive underneath
+ * itself, so writes outside `ledger/` are refused.
+ */
+const WRITABLE_PREFIX = "ledger/";
+const LEDGER_KEY = "ledger/predictions.json";
+
 /** One instance, always. Multiple instances would multiply the GeyserTimes poll rate. */
 const SINGLETON = "geyser-ai";
 
@@ -68,8 +78,11 @@ const MAX_CACHEABLE_BYTES = 1_000_000;
  * lapses the container stops being touched and `sleepAfter` puts it to sleep.
  */
 const ACTIVE_WINDOW_MS = 10 * 60_000;
-/** Most endpoints the cron will refresh in one run, newest interest first. */
-const MAX_REFRESH_TARGETS = 4;
+/**
+ * Most endpoints the cron will refresh in one run, newest interest first. The
+ * dashboard asks for four, so this leaves room for a detail view alongside.
+ */
+const MAX_REFRESH_TARGETS = 6;
 
 /** Beyond this the cached answer is too old to serve; recompute and make them wait. */
 const MAX_STALE_MS = 10 * 60_000;
@@ -79,6 +92,11 @@ function freshnessFor(pathname: string): number | null {
     return 60_000;
   }
   if (pathname === "/api/eruptions/recent") return 60_000;
+  // The scoreboard only moves when an eruption is scored, which needs the
+  // prediction endpoint to have run anyway.
+  if (pathname === "/api/scoreboard" || pathname === "/api/comparisons/recent") {
+    return 120_000;
+  }
   if (pathname === "/api/stats") return 3_600_000;
   // /api/health stays uncached: it is the honest freshness probe, and it is cheap.
   return null;
@@ -99,6 +117,7 @@ export class GeyserContainer extends Container<Env> {
 
   envVars = {
     GEYSER_AI_SNAPSHOT_URL: `http://${SNAPSHOT_HOST}/${SNAPSHOT_KEY}`,
+    GEYSER_AI_LEDGER_URL: `http://${SNAPSHOT_HOST}/${LEDGER_KEY}`,
   };
 
   /**
@@ -181,10 +200,34 @@ export class GeyserContainer extends Container<Env> {
 GeyserContainer.outboundByHost = {
   [SNAPSHOT_HOST]: async (request: Request, env: Env): Promise<Response> => {
     const key = new URL(request.url).pathname.replace(/^\//, "") || SNAPSHOT_KEY;
+
+    if (request.method === "PUT") {
+      if (!key.startsWith(WRITABLE_PREFIX)) {
+        console.error(JSON.stringify({ event: "r2_write_refused", key }));
+        return new Response(`Writes are only allowed under ${WRITABLE_PREFIX}\n`, { status: 403 });
+      }
+      // Buffered rather than streamed: R2 wants a known length for a stream,
+      // and the ledger is a small JSON document by construction.
+      const body = await request.arrayBuffer();
+      await env.SNAPSHOT.put(key, body, {
+        httpMetadata: { contentType: "application/json" },
+      });
+      console.log(JSON.stringify({ event: "ledger_written", key, bytes: body.byteLength }));
+      return new Response(null, { status: 204 });
+    }
+
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return new Response("Method not allowed\n", { status: 405 });
+    }
+
     const object = await env.SNAPSHOT.get(key);
     if (!object) {
-      console.error(JSON.stringify({ event: "snapshot_missing", key }));
-      return new Response(`No snapshot object ${key}\n`, { status: 404 });
+      // A missing ledger is the normal state before the first flush; a missing
+      // snapshot is not, so only the latter is worth shouting about.
+      if (!key.startsWith(WRITABLE_PREFIX)) {
+        console.error(JSON.stringify({ event: "snapshot_missing", key }));
+      }
+      return new Response(`No object ${key}\n`, { status: 404 });
     }
     const headers = new Headers({ "content-type": "application/octet-stream" });
     object.writeHttpMetadata(headers);

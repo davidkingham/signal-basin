@@ -12,7 +12,9 @@ from .service import (
     get_geyser_stats,
     get_health,
     get_predictions,
+    get_recent_comparisons,
     get_recent_eruptions,
+    get_scoreboard,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -94,6 +96,28 @@ def stats(geyser: str | None = Query(None)) -> dict:
     if not DB_PATH.exists():
         raise HTTPException(503, "No database. Run `uv run geyser-ai ingest` first.")
     return get_geyser_stats(_resolve(geyser) if geyser else None)
+
+
+@app.get("/api/scoreboard")
+def scoreboard(
+    days: float = Query(30.0, ge=1, le=365, description="Rolling window to score over."),
+    geyser: str | None = Query(None, description="Optional single-geyser filter."),
+) -> dict:
+    """How this project, the NPS and Geysers.net have actually done, per geyser.
+
+    Accumulated prospectively: GeyserTimes publishes only currently-open
+    predictions, so there is no history to backfill from and `n` starts at zero.
+    """
+    return get_scoreboard(days=days, geyser=_resolve(geyser) if geyser else None)
+
+
+@app.get("/api/comparisons/recent")
+def comparisons_recent(
+    limit: int = Query(20, ge=1, le=200),
+    geyser: str | None = Query(None, description="Optional single-geyser filter."),
+) -> dict:
+    """The most recent scored eruptions, with every source's prediction beside the actual."""
+    return get_recent_comparisons(limit=limit, geyser=_resolve(geyser) if geyser else None)
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -286,6 +286,8 @@ single-page dashboard. Interactive API docs are at `/docs`.
 | `GET /api/predictions/{geyser}?points=240` | One geyser, denser curve |
 | `GET /api/eruptions/recent?hours=24` | Recently logged eruptions (`geyser=` and `targets_only=` filters) |
 | `GET /api/stats?geyser=Grand` | Interval statistics per geyser |
+| `GET /api/scoreboard?days=30` | Rolling accuracy per geyser for this project, the NPS and Geysers.net |
+| `GET /api/comparisons/recent?limit=20` | Recent eruptions with each source's prediction beside the actual |
 | `GET /api/health` | Snapshot age, row counts, sync state |
 
 **Freshness.** The archive snapshot is downloaded once and never re-fetched
@@ -350,6 +352,89 @@ models.py ─> predict.py┘               └─> mcp_server.py  (stdio)
 
 `service.py` is the single read layer; `api.py` and `mcp_server.py` are
 transports over it and hold no logic of their own.
+
+## Comparing against the NPS and Geysers.net
+
+Backtests only ever compare this project against itself. The question a gazer
+actually asks is whether it beats the prediction already printed on the visitor
+centre board — so the deployed service now scores three predictors against the
+same eruptions.
+
+### What the data actually allows
+
+GeyserTimes publishes exactly one predictions route, `predictions_latest`: the
+predictions open **right now**. There is no date-ranged predictions endpoint
+(`/predictions/{from}/{to}` and `/predictions_recent/{minutes}` both 404) and the
+nightly archive contains eruptions and notes only. **There is no historical
+prediction data to be had at any price**, so a retrospective comparison is
+impossible and every number on the scoreboard is accumulated prospectively, from
+the moment logging started. `n` begins at zero and the dashboard says so.
+
+Two predictors publish for the geysers modelled here:
+
+| Source | Who | How it appears |
+|---|---|---|
+| `nps` | National Park Service visitor-centre predictions | Posted by the `GeyserTimes` account (userID 208), marked in the comment as uploaded from the NPS/CartoDB system |
+| `geysers_net` | Geysers.net, a long-running third-party predictor | userID 44, with a stated method — usually "add average interval" — and a self-reported probability |
+
+Both conditions are required to classify a prediction as NPS, so anything else
+that account ever posts is not silently attributed to the Park Service. An
+unrecognised predictor is dropped rather than lumped in with either.
+
+Coverage is partial and worth knowing: in a typical snapshot both sources
+predict Old Faithful, Grand, Daisy, Castle and Riverside; only Geysers.net
+predicts Great Fountain; **neither predicts Beehive**.
+
+### Scoring, and being fair about it
+
+Each source is scored **against the window it states itself**. The NPS claims
+about ±12 minutes on Old Faithful and over two hours on Grand; Geysers.net
+states its own; this project's stated window is its nominal 90% interval. An
+in-window rate is therefore meaningless on its own — a predictor claiming a
+four-hour window should not out-rank one claiming twenty minutes — so the
+median window width is reported beside the rate everywhere it appears, and a
+source that states no window is simply not scored on that metric.
+
+Three more rules, all applied identically to every source:
+
+- **Latest before the eruption wins.** Sources re-predict constantly. A
+  prediction issued at 14:00 and revised at 15:40 is not two attempts; the first
+  was withdrawn. Superseded predictions are discarded, not counted as misses.
+- **Predictions for a later eruption are excluded.** `futureEruptionNumber > 1`
+  forecasts the eruption *after* next, and scoring it against the next one would
+  be plain unfair.
+- **Eruptions beyond a generous horizon are not scored at all.** If nobody logs
+  Riverside overnight, the next logged eruption may be two cycles after the one a
+  prediction was aimed at. Any pairing landing more than three window widths past
+  the predicted time is dropped for everyone, and counted, so the censoring is
+  visible rather than silent.
+
+`scoring.py` is pure — dataclasses in, dataclasses out, no database, no clock,
+no network — because the matching rules are where a three-way comparison is won
+or lost, and they need to be testable in isolation.
+
+### Cost to GeyserTimes: one more request per cycle
+
+`predictions_latest` returns every open prediction from every predictor for every
+geyser in a single response, so logging all sources costs **exactly one extra
+HTTP request per five-minute cycle**, on the same TTL and with the same
+identifying User-Agent as the eruption sync. That property is asserted in the
+test suite alongside the existing sync guarantees.
+
+### Persistence
+
+The ledger has to outlive the container, whose disk is ephemeral, or the
+scoreboard would reset to `n=0` every time the service sleeps. Locally it is a
+JSON file next to the DuckDB database; deployed, the container PUTs and GETs it
+through the same virtual hostname it already uses to pull the snapshot, and the
+Worker answers from R2 — so the container still holds no object-storage
+credentials. Writes are refused outside the `ledger/` prefix, so a bug in the app
+cannot overwrite the eruption archive underneath itself.
+
+Nothing in the path can break a prediction: a ledger that cannot be read starts
+empty, one that cannot be written retries next cycle, and the whole scoreboard
+update is wrapped so that a failure surfaces as a field on the response rather
+than a 500 on the page.
 
 ## Deployment
 

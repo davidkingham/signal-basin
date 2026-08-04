@@ -27,6 +27,13 @@
   --ink-3:#7c8a86;
 
   --brand:#0d6b78;
+
+  /* Scoreboard series. Three predictors need three identities, and the warm
+     accent is spoken for, so they are teal / park-service green / violet:
+     validated all-pairs for protan+deutan against this card colour, and
+     always carried by a label as well as the hue. */
+  --src-ai:#179fa5; --src-nps:#03642b; --src-gn:#623bab;
+
   --band-90:rgba(13,107,120,.13);
   --band-50:rgba(13,107,120,.28);
   --fill-top:rgba(34,184,196,.85);
@@ -44,6 +51,7 @@
     --band-90:rgba(63,208,218,.13); --band-50:rgba(63,208,218,.26);
     --fill-top:rgba(63,208,218,.8); --fill-bot:rgba(63,208,218,.05);
     --mat:#ff7a45;  --amber:#e0a33c;
+    --src-ai:#04a3aa; --src-nps:#05893e; --src-gn:#8763d6;
   }
 }
 :root[data-theme=dark]{
@@ -53,6 +61,7 @@
   --band-90:rgba(63,208,218,.13); --band-50:rgba(63,208,218,.26);
   --fill-top:rgba(63,208,218,.8); --fill-bot:rgba(63,208,218,.05);
   --mat:#ff7a45;  --amber:#e0a33c;
+  --src-ai:#04a3aa; --src-nps:#05893e; --src-gn:#8763d6;
 }
 
 *{box-sizing:border-box}
@@ -189,6 +198,116 @@ h2{
 footer{padding:22px 0 30px;font-size:11.5px;color:var(--ink-3);line-height:1.6}
 footer a{color:var(--ink-2)}
 .skel{opacity:.35}
+
+/* ── scoreboard ─────────────────────────────────────────────
+   Three predictors, each scored against the window it stated
+   itself. Identity is hue + name + a fixed row order, never hue
+   alone; the widths are drawn, not just tabulated, because an
+   in-window rate means nothing without the width behind it.
+   ───────────────────────────────────────────────────────── */
+h2 .h2note{
+  font-family:var(--sans);font-size:11px;font-weight:400;
+  letter-spacing:0;text-transform:none;color:var(--ink-3);margin-left:8px;
+}
+[data-src]{--src:var(--ink-3)}
+[data-src="geyser_ai"]{--src:var(--src-ai)}
+[data-src="nps"]{--src:var(--src-nps)}
+[data-src="geysers_net"]{--src:var(--src-gn)}
+
+.src-dot{
+  width:9px;height:9px;border-radius:50%;background:var(--src);
+  display:inline-block;flex:none;box-shadow:0 0 0 2px var(--card);
+}
+.src-name{font-size:12.5px;font-weight:700;letter-spacing:.03em}
+.src-head{display:flex;align-items:center;gap:7px;flex:none}
+
+/* source key — doubles as the legend, so identity is never colour-only */
+.key{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:11px 13px;margin:9px 0}
+.key-row{padding:9px 0;border-top:1px solid var(--line)}
+.key-row:first-child{border-top:none;padding-top:0}
+.key-row:last-child{padding-bottom:0}
+.key-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.key-desc{font-size:11.5px;color:var(--ink-3);line-height:1.5;margin-top:3px}
+
+/* one card per geyser; one block per source inside it */
+.sb{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px 13px 10px;margin:9px 0}
+.sb-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.sb-name{font-size:14px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+  margin:0;line-height:1.15}
+.sb-erupt{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.sb-src{border-top:1px solid var(--line);margin-top:9px;padding-top:9px}
+.sb-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+/* n is the first thing you should read, not a footnote */
+.sb-n{margin-left:auto;font-family:var(--mono);font-size:12.5px;font-weight:700;
+  font-variant-numeric:tabular-nums;color:var(--ink-2);white-space:nowrap}
+.sb-none{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);margin-top:4px}
+/* below the threshold the numbers are still shown, just visibly provisional */
+.sb-src.thin .plot{opacity:.55}
+.sb-src.thin .wins{color:var(--ink-3)}
+
+/* the plot: a window band, a typical-miss bar, a bias dot, on a shared scale */
+.plot{position:relative;height:18px;margin:7px 0 4px}
+.plot-band{position:absolute;top:1px;bottom:1px;border-radius:2px;
+  background:color-mix(in srgb,var(--src) 16%,transparent);
+  border-left:1px solid color-mix(in srgb,var(--src) 55%,transparent);
+  border-right:1px solid color-mix(in srgb,var(--src) 55%,transparent);}
+.plot-zero{position:absolute;top:0;bottom:0;left:50%;width:1px;background:var(--ink-3)}
+.plot-zero.actual{width:1.5px;background:var(--ink);top:-1px;bottom:-1px}
+.plot-bar{position:absolute;top:50%;height:2px;margin-top:-1px;border-radius:1px;
+  background:var(--src)}
+.plot-cap{position:absolute;top:50%;height:9px;width:2px;margin-top:-4.5px;
+  border-radius:1px;background:var(--src);opacity:.75}
+.plot-dot{position:absolute;top:50%;width:9px;height:9px;margin-top:-4.5px;
+  margin-left:-4.5px;border-radius:50%;background:var(--src);
+  box-shadow:0 0 0 2px var(--card)}
+/* the eruption itself is a fact, not a source's opinion — so it wears ink */
+.plot-dot.actual{background:var(--ink)}
+.sb-stats{gap:2px 12px;margin-top:2px}
+/* the width never breaks away from the rate it qualifies */
+.sb-stats i{font-style:normal;color:var(--ink-3);white-space:nowrap}
+.plot-axis{display:flex;justify-content:space-between;gap:8px;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;
+  color:var(--ink-3);font-variant-numeric:tabular-nums;margin-top:6px}
+.plot-axis span:nth-child(2){text-align:center}
+.plot-axis span:last-child{text-align:right}
+
+/* recent scored eruptions */
+.cmp{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:11px 13px 9px;margin:9px 0}
+.cmp-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.cmp-g{font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.cmp-when{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.cl{margin-top:8px}
+.cl-top{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.cl-nums{margin-left:auto;font-family:var(--mono);font-size:11px;
+  font-variant-numeric:tabular-nums;color:var(--ink-2);
+  display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+.cl-nums span{white-space:nowrap}
+.cl-nums .miss{font-weight:700;color:var(--ink)}
+.cl-nums .lead{color:var(--ink-3)}
+.cl-nums .verdict{letter-spacing:.06em;text-transform:uppercase;font-size:9.5px;
+  color:var(--ink-3);align-self:center}
+
+/* a scoreboard with nothing in it yet is a state, not a failure */
+.empty{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:18px 15px;margin:9px 0;text-align:center}
+.empty-t{font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-2);font-weight:700}
+.empty-b{font-size:12.5px;color:var(--ink-3);line-height:1.55;margin-top:7px;
+  max-width:44ch;margin-left:auto;margin-right:auto}
+
+@media (min-width:560px){
+  .sb-src{display:grid;grid-template-columns:158px 1fr;gap:0 14px;align-items:start}
+  .sb-top{grid-column:1;flex-direction:column;align-items:flex-start;gap:5px}
+  .sb-none,.sb-src .plot,.sb-stats{grid-column:2}
+  .sb-n{margin-left:0}
+  .sb-src .plot{margin-top:1px}
+  .cl-top{flex-wrap:nowrap}
+}
 </style>
 </head>
 <body>
@@ -215,6 +334,31 @@ footer a{color:var(--ink-2)}
 
 <h2>Recently logged</h2>
 <div class="feed" id="feed"><div class="ev"><span class="g">loading…</span></div></div>
+
+<section id="scoreboard" aria-labelledby="sb-h">
+  <h2 id="sb-h">Scoreboard <span class="h2note" id="sb-window">last 30 days</span></h2>
+  <p class="note">
+    Three predictors, each scored against the window <em>it</em> stated — and those
+    windows are not the same size, so every in-window rate is shown with the width
+    it was earned on. Each plot is centred on the prediction: the shaded band is the
+    stated window, the bar is the typical miss, the dot is which way it leans.
+    Right of centre means the eruption ran <b>late</b>.
+  </p>
+  <div id="sb-key"></div>
+  <div id="sb-rows"><div class="empty skel"><div class="empty-t">loading scoreboard…</div></div></div>
+
+  <div id="cmp-block">
+    <h2>Last scored eruptions</h2>
+    <p class="note">
+      One row per logged eruption, one plot per source. Each plot is centred on that
+      source's own prediction, the band is the window it stated, and the dark dot is
+      where the eruption actually landed — inside the band or not.
+    </p>
+    <div id="cmp-rows"></div>
+  </div>
+
+  <div class="note" id="sb-method"></div>
+</section>
 
 <footer>
   Predictions are probability distributions, not promises — the shaded band is
@@ -510,6 +654,336 @@ async function load(){
   }
 }
 
+/* ── scoreboard ─────────────────────────────────────────────
+   Everything in this section lives in one frame: the centre line
+   is the prediction, right of it means the eruption ran late, and
+   the shaded band is the window that source stated for itself.
+   The scoreboard plot is the aggregate of the comparison plots,
+   so the two read as the same picture at two zoom levels.
+   ───────────────────────────────────────────────────────── */
+const SCORE_DAYS = 30;
+const CMP_LIMIT  = 12;
+const LOW_N      = 5;     // below this a rate is noise, and is labelled as such
+const SRC_FALLBACK = [
+  {key:"geyser_ai",   label:"Geyser AI",   window_label:"90%"},
+  {key:"nps",         label:"NPS",         window_label:"stated"},
+  {key:"geysers_net", label:"Geysers.net", window_label:"stated"}
+];
+
+const esc = s => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+/** minutes, rounded to something a person reads rather than audits */
+const num = m => String(Math.abs(m) >= 100 ? Math.round(m) : Math.round(m*10)/10);
+const sgn = m => (m > 0 ? "+" : "") + num(m);
+const dirWord = m => m > 0 ? "late" : m < 0 ? "early" : "";
+const pctText = x => Math.round(x*100) + "%";
+/* A stated window is not symmetric about the prediction -- a geyser is far more
+   often late than impossibly early -- so the two halves are carried separately
+   and only collapsed when a source reports a width without them. */
+function bandOf(s){
+  const lo = s.median_window_lo_min, hi = s.median_window_hi_min;
+  if (lo != null && hi != null && (lo > 0 || hi > 0)) return [-lo, hi];
+  const w = s.median_window_width_min;
+  return (w != null && w > 0) ? [-w/2, w/2] : null;
+}
+const leadText = m => m < 60 ? `${Math.round(m)}m`
+  : `${Math.floor(m/60)}h ${String(Math.round(m%60)).padStart(2,"0")}m`;
+
+/* Axis half-spans stay on a short ladder so the same number recurs
+   across geysers and the plots stay comparable at a glance. */
+const NICE = [5,10,15,20,30,45,60,90,120,180,240,360,480];
+function niceSpan(x){ for (const n of NICE) if (x <= n) return n; return Math.ceil(x/60)*60; }
+
+/* ── the plot ───────────────────────────────────────────────
+   Positioned in percentages rather than SVG: it reflows with the
+   card, so a phone gets the same drawing as a laptop and nothing
+   is stretched out of proportion.                                */
+const pos = (m, span) => Math.max(0, Math.min(100, 50 + (m/span)*50));
+
+function plot(span, o){
+  let h = "";
+  if (o.band){
+    const a = pos(o.band[0], span), b = pos(o.band[1], span);
+    h += `<span class="plot-band" style="left:${a.toFixed(2)}%;width:${
+      Math.max(b-a, 0.8).toFixed(2)}%"></span>`;
+  }
+  h += `<span class="plot-zero"></span>`;
+  if (o.bar){
+    const a = pos(Math.min(o.bar[0],o.bar[1]), span), b = pos(Math.max(o.bar[0],o.bar[1]), span);
+    h += `<span class="plot-bar" style="left:${a.toFixed(2)}%;width:${(b-a).toFixed(2)}%"></span>`;
+    if (o.caps) [a,b].forEach(x =>
+      h += `<span class="plot-cap" style="left:${x.toFixed(2)}%"></span>`);
+  }
+  if (o.dot != null){
+    h += `<span class="plot-dot${o.actual ? " actual" : ""}" style="left:${
+      pos(o.dot, span).toFixed(2)}%"></span>`;
+  }
+  return `<div class="plot" role="img" aria-label="${esc(o.label||"")}" title="${
+    esc(o.label||"")}">${h}</div>`;
+}
+const axis = (span, centre) =>
+  `<div class="plot-axis"><span>-${span} min</span><span>${centre
+   }</span><span>+${span} min</span></div>`;
+
+/* ── source key (also the legend — identity is never colour alone) ── */
+function renderKey(sources){
+  document.getElementById("sb-key").innerHTML =
+    `<div class="key">` + sources.map(s => `
+      <div class="key-row" data-src="${esc(s.key)}">
+        <div class="key-top">
+          <span class="src-head"><span class="src-dot"></span>
+            <span class="src-name">${esc(s.label)}</span></span>
+          <span class="chip">${esc(s.window_label)} window</span>
+        </div>
+        ${s.description ? `<div class="key-desc">${esc(s.description)}</div>` : ""}
+      </div>`).join("") + `</div>`;
+}
+
+/* ── per-geyser rows ────────────────────────────────────── */
+function geyserSpan(row, sources){
+  let m = 5;
+  sources.forEach(src => {
+    const s = row.by_source ? row.by_source[src.key] : null;
+    if (!s || !s.n) return;
+    const band = bandOf(s);
+    if (band) m = Math.max(m, -band[0], band[1]);
+    if (s.mae_min != null) m = Math.max(m, s.mae_min);
+    if (s.median_signed_error_min != null) m = Math.max(m, Math.abs(s.median_signed_error_min));
+  });
+  return niceSpan(m * 1.12);
+}
+
+function sbSource(meta, s, span){
+  const key = esc(meta.key);
+  let top = `<div class="sb-top">`
+    + `<span class="src-head"><span class="src-dot"></span>`
+    + `<span class="src-name">${esc(meta.label)}</span></span>`
+    + `<span class="chip">${esc(meta.window_label)} window</span>`;
+
+  if (!s || !s.n){
+    // Three different silences, and conflating them would misrepresent a source:
+    // it has a prediction open and nothing has erupted yet; it predicted none of
+    // the eruptions that were scored; or it never predicts this geyser at all.
+    const why = !s ? "does not predict this geyser"
+      : s.awaiting_first_eruption ? "predicting now · nothing scored yet"
+      : "no open prediction for these eruptions";
+    return `<div class="sb-src" data-src="${key}">${top}</div>`
+      + `<div class="sb-none">${why}</div></div>`;
+  }
+  const thin = s.n < LOW_N;
+  top += (thin ? `<span class="chip warn">provisional</span>` : "")
+       + `<span class="sb-n">n = ${s.n}</span></div>`;
+
+  const w = s.median_window_width_min;
+  const label = `${meta.label}: ${w != null ? num(w) + " min stated window" : "window unknown"}`
+    + (s.mae_min != null ? `, typical miss ${num(s.mae_min)} min` : "")
+    + (s.median_signed_error_min != null
+        ? `, usually ${num(Math.abs(s.median_signed_error_min))} min ${
+            dirWord(s.median_signed_error_min)}` : "")
+    + `, over ${s.n} eruption${s.n === 1 ? "" : "s"}`;
+
+  const p = plot(span, {
+    band: bandOf(s),
+    bar:  s.mae_min != null ? [-s.mae_min, s.mae_min] : null,
+    caps: true,
+    dot:  s.median_signed_error_min,
+    label
+  });
+
+  // Every rate carries the width it was earned on and the raw count that
+  // produced it, in the same breath — that is the whole point of the section.
+  const st = [];
+  st.push(`<span><b>MAE</b> ${s.mae_min != null ? num(s.mae_min)+" min" : "—"}</span>`);
+  if (s.median_signed_error_min != null)
+    st.push(`<span><b>bias</b> ${sgn(s.median_signed_error_min)} min ${
+      dirWord(s.median_signed_error_min)}</span>`);
+  if (s.in_window_rate != null)
+    st.push(`<span><b>in window</b> ${pctText(s.in_window_rate)} · ${
+      s.n_in_window}/${s.n_windowed} <i>of a ${
+      w != null ? num(w) : "?"} min window</i></span>`);
+  if (s.in_50_rate != null)
+    st.push(`<span><b>in its 50%</b> ${pctText(s.in_50_rate)} · ${
+      s.n_in_50}/${s.n_inner}${s.median_window_50_width_min != null
+        ? ` <i>of a ${num(s.median_window_50_width_min)} min window</i>` : ""}</span>`);
+  if (s.coverage != null)
+    st.push(`<span><b>covered</b> ${pctText(s.coverage)} of eruptions</span>`);
+
+  return `<div class="sb-src${thin ? " thin" : ""}" data-src="${key}">${top}${p}`
+    + `<div class="wins sb-stats">${st.join("")}</div></div>`;
+}
+
+function sbCard(row, sources){
+  const span = geyserSpan(row, sources);
+  const n = row.n_eruptions || 0;
+  // An axis with nothing drawn on it is furniture, so it only appears once
+  // there is at least one plot for it to measure.
+  const drawn = sources.some(m => {
+    const s = row.by_source ? row.by_source[m.key] : null; return s && s.n; });
+  return `<article class="sb">
+      <div class="sb-head">
+        <h3 class="sb-name">${esc(row.geyser)}</h3>
+        <span class="sb-erupt">${n} eruption${n === 1 ? "" : "s"} logged</span>
+      </div>
+      ${sources.map(m => sbSource(m, row.by_source ? row.by_source[m.key] : null, span)).join("")}
+      ${drawn ? axis(span, "prediction") : ""}
+    </article>`;
+}
+
+let sbEmpty = true;
+
+function renderScoreboard(d, sources){
+  const host = document.getElementById("sb-rows");
+  const rows = (d.rows || []).filter(Boolean);
+  const anything = rows.some(r => (r.n_eruptions || 0) > 0
+    || sources.some(m => { const s = r.by_source && r.by_source[m.key]; return s && s.n; }));
+  sbEmpty = !anything;
+  if (!anything){
+    host.innerHTML = `<div class="empty">
+        <div class="empty-t">No scored eruptions yet</div>
+        <div class="empty-b">Predictions from all three sources are being logged from
+        now on, and each one is scored the moment an eruption closes it. The first
+        rows appear here within a day or two of the first logged eruption.</div>
+      </div>`;
+    return;
+  }
+  host.innerHTML = rows.map(r => sbCard(r, sources)).join("");
+}
+
+/* ── the last few eruptions, one plot per source ─────────── */
+/* Window edges as minutes either side of the prediction. Measured from the UTC
+   pair, not the displayed HH:MM, so a window spanning midnight or a daylight
+   saving change cannot be silently folded onto the wrong day. */
+function winOffsets(s){
+  const p = Date.parse(s.predicted_utc);
+  if (s.window_utc && s.window_utc.length === 2 && !isNaN(p)){
+    const a = (Date.parse(s.window_utc[0]) - p) / 60000;
+    const b = (Date.parse(s.window_utc[1]) - p) / 60000;
+    if (!isNaN(a) && !isNaN(b) && b > a) return [a, b];
+  }
+  // No explicit edges: fall back to the stated width, centred.
+  if (s.window_width_min != null && s.window_width_min > 0)
+    return [-s.window_width_min/2, s.window_width_min/2];
+  return null;
+}
+
+function cmpCard(c, sources){
+  let span = 5;
+  const lanes = sources.map(meta => {
+    const s = c.sources ? c.sources[meta.key] : null;
+    if (!s) return {meta, s:null};
+    const win = winOffsets(s);
+    if (s.signed_error_min != null) span = Math.max(span, Math.abs(s.signed_error_min));
+    if (win) span = Math.max(span, Math.abs(win[0]), Math.abs(win[1]));
+    return {meta, s, win};
+  });
+  span = niceSpan(span * 1.15);
+
+  const rows = lanes.map(L => {
+    const key = esc(L.meta.key);
+    const head = `<div class="cl" data-src="${key}"><div class="cl-top">`
+      + `<span class="src-head"><span class="src-dot"></span>`
+      + `<span class="src-name">${esc(L.meta.label)}</span></span>`;
+    if (!L.s){
+      return head + `<span class="cl-nums"><span class="lead">no prediction</span>`
+        + `</span></div></div>`;
+    }
+    const e = L.s.signed_error_min;
+    const nums = [];
+    if (L.s.predicted_local) nums.push(`<span>said ${esc(L.s.predicted_local)}</span>`);
+    if (e != null) nums.push(`<span class="miss">${sgn(e)} min ${dirWord(e)}</span>`);
+    nums.push(`<span class="verdict">${L.s.in_window ? "in window" : "outside window"}</span>`);
+    if (L.s.lead_minutes != null)
+      nums.push(`<span class="lead">${leadText(L.s.lead_minutes)} ahead</span>`);
+
+    const label = `${L.meta.label} said ${L.s.predicted_local || "—"}`
+      + (L.s.window_width_min != null ? `, a ${num(L.s.window_width_min)} min window` : "")
+      + (e != null ? `; the eruption ran ${num(Math.abs(e))} min ${dirWord(e)}` : "")
+      + `, ${L.s.in_window ? "inside" : "outside"} that window`
+      + (L.s.detail ? ` (${L.s.detail})` : "");
+
+    return head + `<span class="cl-nums">${nums.join("")}</span></div>`
+      + plot(span, {
+          band: L.win,
+          bar:  e != null ? [0, e] : null,
+          dot:  e,
+          actual: true,
+          label
+        })
+      + `</div>`;
+  }).join("");
+
+  const ago = c.actual_utc
+    ? humanAgo((Date.now() - new Date(c.actual_utc).getTime())/60000) : "";
+  return `<article class="cmp">
+      <div class="cmp-head">
+        <span class="cmp-g">${esc(c.geyser)}</span>
+        <span class="cmp-when">erupted ${esc(c.actual_local || "")}${ago ? " · " + ago : ""}</span>
+      </div>
+      ${rows}
+      ${axis(span, "each prediction")}
+    </article>`;
+}
+
+function renderComparisons(d, sources){
+  const host = document.getElementById("cmp-rows");
+  const items = (d.comparisons || []).slice(0, CMP_LIMIT);
+  // One designed empty state is a statement; two stacked is a broken page, so
+  // this block stands down entirely while the scoreboard above says the same thing.
+  document.getElementById("cmp-block").hidden = !items.length && sbEmpty;
+  if (!items.length){
+    host.innerHTML = `<div class="empty">
+        <div class="empty-t">Nothing scored yet</div>
+        <div class="empty-b">Every logged eruption closes whichever predictions were
+        open for it. The first comparison lands here as soon as one does.</div>
+      </div>`;
+    return;
+  }
+  host.innerHTML = items.map(c => cmpCard(c, sources)).join("");
+}
+
+/* ── methodology, on the page rather than in the README ─── */
+function renderMethod(d){
+  const bits = [];
+  if (d.methodology) bits.push(esc(d.methodology));
+  bits.push(`Nothing here is combined into a single score. A wide window buys a high `
+    + `in-window rate, so that rate is only ever shown beside the width that earned `
+    + `it. Rates over fewer than ${LOW_N} eruptions are marked provisional and given `
+    + `as a fraction — 100% of one eruption is one eruption, not a record.`);
+  document.getElementById("sb-method").innerHTML = bits.join("<br><br>");
+}
+
+/* ── load (strictly additive: this section can fail alone) ── */
+async function loadScoreboard(){
+  try{
+    const j = r => { if (!r.ok) throw new Error(r.status); return r.json(); };
+    const [sb, cmp] = await Promise.all([
+      fetch(`/api/scoreboard?days=${SCORE_DAYS}`).then(j),
+      fetch(`/api/comparisons/recent?limit=${CMP_LIMIT}`).then(j)
+    ]);
+    const sources = (sb && sb.sources && sb.sources.length) ? sb.sources : SRC_FALLBACK;
+    renderKey(sources);
+    document.getElementById("sb-window").textContent =
+      `last ${sb.window_days || SCORE_DAYS} days` + (sb.since_utc ? ` · since ${
+        new Intl.DateTimeFormat("en-US",{timeZone:"America/Denver",month:"short",
+          day:"numeric"}).format(new Date(sb.since_utc))}` : "");
+    renderScoreboard(sb, sources);
+    renderComparisons(cmp, sources);
+    renderMethod(sb);
+  }catch(err){
+    // Hold whatever is already drawn rather than flashing an empty card.
+    const host = document.getElementById("sb-rows");
+    if (host && !host.querySelector(".sb")){
+      host.innerHTML = `<div class="empty">
+          <div class="empty-t">Scoreboard unavailable</div>
+          <div class="empty-b">The predictions above are unaffected — the scoring
+          service just isn't answering right now.</div>
+        </div>`;
+      document.getElementById("cmp-block").hidden = true;
+    }
+  }
+}
+
 /* ── theme toggle (auto by default) ─────────────────────── */
 document.getElementById("theme").addEventListener("click", () => {
   const cur = document.documentElement.getAttribute("data-theme");
@@ -519,11 +993,15 @@ document.getElementById("theme").addEventListener("click", () => {
   if (lastData) load();
 });
 
+/* The scoreboard is fetched alongside the predictions but never through them:
+   if the scoring endpoints are missing or broken the cards still render. */
+function refresh(){ load(); loadScoreboard(); }
+
 parkClock();
 setInterval(parkClock, 1000);
 setInterval(renderAxis, 60000);
-load();
-setInterval(load, REFRESH_MS);
+refresh();
+setInterval(refresh, REFRESH_MS);
 </script>
 </body>
 </html>

@@ -13,7 +13,13 @@ from mcp.server import MCPServer
 from pydantic import Field
 
 from .config import TARGET_GEYSERS
-from .service import get_geyser_stats, get_predictions, get_recent_eruptions
+from .service import (
+    get_geyser_stats,
+    get_predictions,
+    get_recent_comparisons,
+    get_recent_eruptions,
+    get_scoreboard,
+)
 
 mcp = MCPServer(
     name="geyser-ai",
@@ -76,6 +82,31 @@ def get_geyser_stats_tool(
     validity-filtered intervals, plus the same for the last 12 months.
     """
     return get_geyser_stats(geyser)
+
+
+@mcp.tool(name="get_scoreboard")
+def get_scoreboard_tool(
+    days: Annotated[float, Field(ge=1, le=365, description="Rolling window.")] = 30.0,
+    geyser: Annotated[GeyserName | None, Field(description="Omit for all seven.")] = None,
+) -> dict[str, Any]:
+    """How this project, the NPS and Geysers.net have actually done, per geyser.
+
+    Accumulated prospectively -- GeyserTimes publishes only currently-open
+    predictions, so there is no history to backfill and `n` may be very small.
+    Each source is scored in the window it states itself, so always read
+    `in_window_rate` next to `median_window_width_min`; a wide claimed window is
+    easier to hit. Report `n` whenever quoting any of these numbers.
+    """
+    return get_scoreboard(days=days, geyser=geyser)
+
+
+@mcp.tool(name="get_recent_comparisons")
+def get_recent_comparisons_tool(
+    limit: Annotated[int, Field(ge=1, le=200, description="How many eruptions.")] = 20,
+    geyser: Annotated[GeyserName | None, Field(description="Optional filter.")] = None,
+) -> dict[str, Any]:
+    """Recent eruptions with each source's prediction beside what actually happened."""
+    return get_recent_comparisons(limit=limit, geyser=geyser)
 
 
 def main() -> None:

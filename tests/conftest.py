@@ -12,6 +12,7 @@ filter under test is the one that ships.
 
 from __future__ import annotations
 
+import itertools
 import os
 import tempfile
 import time
@@ -22,6 +23,7 @@ import numpy as np
 import pytest
 
 _TMP = Path(tempfile.mkdtemp(prefix="geyser-ai-tests-"))
+_LEDGER_SEQ = itertools.count()
 _DB = _TMP / "test.duckdb"
 os.environ["GEYSER_AI_DB"] = str(_DB)
 os.environ["GEYSER_AI_DATA_DIR"] = str(_TMP)
@@ -151,6 +153,17 @@ def _offline(monkeypatch):
     unacceptable in a test suite, so it is stubbed for every test. Tests that
     exercise the sync itself mock `httpx` directly instead.
     """
+    import geyser_ai.ledger as ledger_mod
     import geyser_ai.service as svc
 
     monkeypatch.setattr(svc, "sync_recent", lambda **kw: {"cached": True, "n_last": 0})
+    # The scoreboard reaches for `predictions_latest` on the same cadence, so it
+    # gets the same treatment. Tests that exercise the feed mock httpx directly.
+    monkeypatch.setattr(svc, "fetch_predictions", lambda *a, **kw: [])
+
+    # Every test gets its own ledger, in its own file, so scoring tests cannot
+    # leak state into each other or into the developer's real ledger.
+    ledger_path = _TMP / f"ledger-{next(_LEDGER_SEQ)}.json"
+    monkeypatch.setattr(ledger_mod, "LEDGER_URL", "")
+    monkeypatch.setattr(ledger_mod, "LEDGER_PATH", ledger_path)
+    ledger_mod.reset_ledger(ledger_mod.FileLedgerStore(ledger_path))

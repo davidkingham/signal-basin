@@ -14,11 +14,18 @@ import numpy as np
 import pandas as pd
 
 from .config import DB_PATH, TARGET_GEYSERS
+from .ledger import get_ledger
 from .models import Prediction, SamplePrediction
 from .predict import predict_geyser
+from .scoring import Eruption, LoggedPrediction, match_and_score
+from .sources import SOURCE_LABELS, THIRD_PARTY_SOURCES, fetch_predictions
 from .sync import sync_recent, sync_status
 
 PARK_TZ = "America/Denver"
+
+# How far back the matcher looks for eruptions each cycle. Comfortably longer
+# than a prediction stays open, short enough that the query stays cheap.
+SCORING_LOOKBACK_HOURS = 72
 
 
 def _density_curve(
@@ -139,8 +146,14 @@ def get_predictions(
     density_points: int = 96,
     do_sync: bool = True,
     db_path=DB_PATH,
+    record: bool = True,
 ) -> dict[str, Any]:
-    """Renewal-adjusted next-eruption predictions, sorted by soonest."""
+    """Renewal-adjusted next-eruption predictions, sorted by soonest.
+
+    `record` also logs this round of predictions to the scoreboard ledger and
+    scores anything that has erupted since. Only a full run does so: a
+    single-geyser request is a detail view, not a new forecast.
+    """
     if do_sync:
         sync_recent(db_path=db_path)
 
@@ -187,13 +200,24 @@ def get_predictions(
     ok = [r for r in out if "error" not in r]
     bad = [r for r in out if "error" in r]
     ok.sort(key=lambda r: r["minutes_until"])
-    return {
+    payload = {
         "generated_utc": pd.Timestamp.now(tz="UTC").isoformat(),
         "park_time": pd.Timestamp.now(tz=PARK_TZ).strftime("%Y-%m-%d %H:%M %Z"),
         "window_hours": hours,
         "predictions": ok + bad,
         "sync": _sync_summary(),
     }
+
+    # The scoreboard is a side effect of predicting, on the same cadence and
+    # under its own TTL. It must never be able to break the prediction that
+    # earned it, so every failure mode ends here.
+    if record and geysers is None:
+        try:
+            update_scoreboard(payload, db_path=db_path)
+        except Exception as exc:  # pragma: no cover - defensive
+            payload["scoreboard_error"] = f"{type(exc).__name__}: {exc}"
+
+    return payload
 
 
 def _sync_summary() -> dict[str, Any]:
@@ -336,6 +360,326 @@ def get_geyser_stats(geyser: str | None = None, db_path=DB_PATH) -> dict[str, An
     finally:
         con.close()
     return {"stats": rows}
+
+
+METHODOLOGY = (
+    "GeyserTimes publishes only the predictions that are open right now -- there is no "
+    "historical predictions endpoint and none in the nightly archive -- so every number here "
+    "was accumulated prospectively, from the moment logging started. "
+    "Each source is scored against the window it states itself: the National Park Service and "
+    "Geysers.net publish an explicit window with every prediction, and this project's stated "
+    "window is its nominal 90% interval. In-window rate is therefore only meaningful beside the "
+    "median window width, which is why both are always shown. "
+    "When a source re-predicts, only the last prediction issued before the eruption is scored; "
+    "the ones it replaced are discarded rather than counted as misses. "
+    "Coverage is the share of scored eruptions for which this source had a prediction open, out "
+    "of the eruptions any source predicted. "
+    "Eruptions that land more than three window widths past a prediction are dropped for every "
+    "source alike: in crowd-sourced data that usually means an eruption went unlogged in "
+    "between, and charging that to the forecaster would be measuring the observers instead."
+)
+
+
+def _our_key(pred: dict[str, Any], predicted_epoch: int) -> str:
+    """Identify one forecast, so recomputing it does not fill the ledger with copies.
+
+    In the base regime a forecast is "the next eruption after this anchor", so
+    the anchor is the identity: the answer only becomes a genuinely new forecast
+    when a new eruption is logged. The point estimate wobbles by a few seconds
+    between runs because the renewal adjustment is a Monte-Carlo simulation, and
+    that wobble is not new information.
+
+    A neighbour-conditioned nowcast is different. Beehive's Indicator regime is
+    anchored to the present, not to the last eruption, so each recompute really
+    does say something new and is keyed on the predicted minute instead. The
+    ledger's per-series cap is what bounds that.
+    """
+    geyser = pred["geyser"]
+    regime = str(pred.get("regime") or "base")
+    anchor = pred.get("last_eruption_utc")
+    if regime == "base" and anchor:
+        return f"geyser_ai:{geyser}:{int(pd.Timestamp(anchor).timestamp())}"
+    return f"geyser_ai:{geyser}:{regime}:{predicted_epoch // 60}"
+
+
+def _our_logged_predictions(payload: dict[str, Any]) -> list[LoggedPrediction]:
+    """Turn this project's own predictions into ledger records."""
+    out: list[LoggedPrediction] = []
+    for pred in payload.get("predictions") or []:
+        if "error" in pred or not pred.get("predicted_utc"):
+            continue
+        try:
+            predicted = int(pd.Timestamp(pred["predicted_utc"]).timestamp())
+            w90 = [int(pd.Timestamp(t).timestamp()) for t in pred["window_90_utc"]]
+            w50 = [int(pd.Timestamp(t).timestamp()) for t in pred["window_50_utc"]]
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        geyser = pred["geyser"]
+        out.append(
+            LoggedPrediction(
+                source="geyser_ai",
+                geyser=geyser,
+                key=_our_key(pred, predicted),
+                issued_epoch=int(dt.datetime.now(dt.UTC).timestamp()),
+                predicted_epoch=predicted,
+                window_open_epoch=w90[0],
+                window_close_epoch=w90[1],
+                inner_open_epoch=w50[0],
+                inner_close_epoch=w50[1],
+                detail=str(pred.get("model") or ""),
+            )
+        )
+    return out
+
+
+def _eruptions_for_scoring(db_path=DB_PATH) -> list[Eruption]:
+    recent = get_recent_eruptions(
+        hours=SCORING_LOOKBACK_HOURS,
+        geysers=list(TARGET_GEYSERS),
+        do_sync=False,
+        db_path=db_path,
+    )
+    out = []
+    for row in recent["eruptions"]:
+        try:
+            epoch = int(pd.Timestamp(row["time_utc"]).timestamp())
+        except (KeyError, TypeError, ValueError):
+            continue
+        out.append(Eruption(geyser=row["geyser"], eruption_id=row["eruption_id"], epoch=epoch))
+    return out
+
+
+def update_scoreboard(
+    our_predictions: dict[str, Any] | None = None, db_path=DB_PATH
+) -> dict[str, Any]:
+    """Log what everyone predicted, then score whatever has since erupted.
+
+    Runs on the same cadence as the eruption sync and costs one extra HTTP
+    request per cycle -- the single `predictions_latest` call that returns every
+    open prediction from every predictor at once.
+    """
+    led = get_ledger()
+
+    if our_predictions:
+        led.add_open(_our_logged_predictions(our_predictions))
+
+    for pred in fetch_predictions():
+        led.add_open(
+            [
+                LoggedPrediction(
+                    source=pred.source,
+                    geyser=pred.geyser,
+                    key=pred.key,
+                    issued_epoch=pred.issued_epoch,
+                    predicted_epoch=pred.predicted_epoch,
+                    window_open_epoch=pred.window_open_epoch,
+                    window_close_epoch=pred.window_close_epoch,
+                    detail=pred.detail,
+                )
+            ]
+        )
+
+    result = match_and_score(
+        list(led.open.values()),
+        _eruptions_for_scoring(db_path),
+        now_epoch=int(dt.datetime.now(dt.UTC).timestamp()),
+        already_scored=led.already_scored(),
+    )
+    led.apply(result)
+    led.flush()
+    return {**led.snapshot(), "newly_scored": len(result.scored)}
+
+
+def _summarise(
+    rows: list[Any], source: str, n_eruptions: int, has_open: bool = False
+) -> dict[str, Any] | None:
+    """Per-source statistics for one geyser.
+
+    `None` means this source does not predict this geyser at all -- neither the
+    NPS nor Geysers.net publishes anything for Beehive, for instance. A zeroed
+    row means it does predict it and nothing has been scored yet, which is a
+    completely different statement and must not be shown as the same thing.
+    """
+    mine = [r for r in rows if r.source == source]
+    if not mine:
+        return {"n": 0, "awaiting_first_eruption": True} if has_open else None
+
+    windowed = [r for r in mine if r.in_window is not None]
+    widths = [r.window_width_min for r in mine if r.window_width_min is not None]
+    inner = [r for r in mine if r.in_inner_window is not None]
+
+    def median(values: list[float]) -> float | None:
+        return round(float(np.median(values)), 1) if values else None
+
+    def half_widths(low_attr: str, high_attr: str) -> tuple[float | None, float | None]:
+        """Median distance from the point prediction to each edge of the window.
+
+        Reported separately because a predictive distribution is skewed -- a
+        geyser is far more often late than impossibly early -- and collapsing
+        that to one width would hide which side of the prediction the slack is on.
+        """
+        lows, highs = [], []
+        for r in mine:
+            low, high = getattr(r, low_attr), getattr(r, high_attr)
+            if low is None or high is None:
+                continue
+            lows.append((r.predicted_epoch - low) / 60.0)
+            highs.append((high - r.predicted_epoch) / 60.0)
+        return median(lows), median(highs)
+
+    lo, hi = half_widths("window_open_epoch", "window_close_epoch")
+    inner_widths = [
+        (r.inner_close_epoch - r.inner_open_epoch) / 60.0
+        for r in mine
+        if r.inner_open_epoch is not None and r.inner_close_epoch is not None
+    ]
+    n_in_window = sum(1 for r in windowed if r.in_window)
+    n_in_50 = sum(1 for r in inner if r.in_inner_window)
+
+    return {
+        "n": len(mine),
+        "mae_min": round(float(np.mean([r.abs_error_min for r in mine])), 1),
+        "median_signed_error_min": median([r.signed_error_min for r in mine]),
+        "in_window_rate": (round(n_in_window / len(windowed), 3) if windowed else None),
+        # Exact counts, so the dashboard never has to reconstruct "8 of 9" from
+        # a rounded rate and get it off by one.
+        "n_in_window": n_in_window if windowed else None,
+        "n_windowed": len(windowed) or None,
+        "median_window_width_min": median(widths),
+        "median_window_lo_min": lo,
+        "median_window_hi_min": hi,
+        "coverage": round(len(mine) / n_eruptions, 3) if n_eruptions else None,
+        "in_50_rate": (round(n_in_50 / len(inner), 3) if inner else None),
+        "n_in_50": n_in_50 if inner else None,
+        "n_inner": len(inner) or None,
+        "median_window_50_width_min": median(inner_widths),
+    }
+
+
+def get_scoreboard(days: float = 30.0, geyser: str | None = None) -> dict[str, Any]:
+    """Rolling accuracy per geyser per source, over the last `days`."""
+    led = get_ledger()
+    now = dt.datetime.now(dt.UTC)
+    cutoff = int((now - dt.timedelta(days=days)).timestamp())
+    scored = [s for s in led.scored if s.actual_epoch >= cutoff]
+    if geyser:
+        scored = [s for s in scored if s.geyser == geyser]
+
+    sources = [{"key": key, **SOURCE_LABELS[key]} for key in ("geyser_ai", *THIRD_PARTY_SOURCES)]
+
+    # Who currently has a prediction open, so "nothing scored yet" can be told
+    # apart from "never predicts this geyser".
+    open_pairs = {(p.source, p.geyser) for p in led.open.values()}
+
+    rows = []
+    for name in TARGET_GEYSERS:
+        if geyser and name != geyser:
+            continue
+        mine = [s for s in scored if s.geyser == name]
+        n_eruptions = len({s.eruption_id for s in mine})
+        rows.append(
+            {
+                "geyser": name,
+                "n_eruptions": n_eruptions,
+                "by_source": {
+                    src["key"]: _summarise(
+                        mine,
+                        src["key"],
+                        n_eruptions,
+                        has_open=(src["key"], name) in open_pairs,
+                    )
+                    for src in sources
+                },
+            }
+        )
+
+    return {
+        "generated_utc": now.isoformat(),
+        "window_days": days,
+        "since_utc": dt.datetime.fromtimestamp(cutoff, tz=dt.UTC).isoformat(),
+        "logging_started_utc": led.started_utc,
+        "sources": sources,
+        "rows": rows,
+        "ledger": led.snapshot(),
+        "methodology": METHODOLOGY,
+    }
+
+
+def get_recent_comparisons(limit: int = 20, geyser: str | None = None) -> dict[str, Any]:
+    """The last `limit` scored eruptions, with what each source had said."""
+    led = get_ledger()
+    scored = [s for s in led.scored if not geyser or s.geyser == geyser]
+
+    by_eruption: dict[int, list[Any]] = {}
+    for row in scored:
+        by_eruption.setdefault(row.eruption_id, []).append(row)
+
+    ordered = sorted(
+        by_eruption.items(), key=lambda kv: max(r.actual_epoch for r in kv[1]), reverse=True
+    )[:limit]
+
+    def local(epoch: int, fmt: str) -> str:
+        return pd.Timestamp(epoch, unit="s", tz="UTC").tz_convert(PARK_TZ).strftime(fmt)
+
+    comparisons = []
+    for eruption_id, rows in ordered:
+        actual = rows[0].actual_epoch
+        sources: dict[str, Any] = {}
+        for key in ("geyser_ai", *THIRD_PARTY_SOURCES):
+            row = next((r for r in rows if r.source == key), None)
+            if row is None:
+                sources[key] = None
+                continue
+
+            def pair(low: int | None, high: int | None, fmt: str | None = None):
+                """Both edges of a window, or None when the source states none."""
+                if low is None or high is None:
+                    return None
+                if fmt:
+                    return [local(low, fmt), local(high, fmt)]
+                return [
+                    dt.datetime.fromtimestamp(low, tz=dt.UTC).isoformat(),
+                    dt.datetime.fromtimestamp(high, tz=dt.UTC).isoformat(),
+                ]
+
+            sources[key] = {
+                "predicted_utc": dt.datetime.fromtimestamp(
+                    row.predicted_epoch, tz=dt.UTC
+                ).isoformat(),
+                "predicted_local": local(row.predicted_epoch, "%H:%M"),
+                "signed_error_min": row.signed_error_min,
+                "abs_error_min": row.abs_error_min,
+                "in_window": row.in_window,
+                "in_50": row.in_inner_window,
+                "window_local": pair(row.window_open_epoch, row.window_close_epoch, "%H:%M"),
+                # Unambiguous across midnight and daylight saving, which the
+                # local HH:MM pair on its own is not.
+                "window_utc": pair(row.window_open_epoch, row.window_close_epoch),
+                "window_50_local": pair(row.inner_open_epoch, row.inner_close_epoch, "%H:%M"),
+                "window_50_utc": pair(row.inner_open_epoch, row.inner_close_epoch),
+                "window_width_min": row.window_width_min,
+                "lead_minutes": row.lead_minutes,
+                "detail": row.detail,
+            }
+
+        comparisons.append(
+            {
+                "geyser": rows[0].geyser,
+                "eruption_id": eruption_id,
+                "actual_utc": dt.datetime.fromtimestamp(actual, tz=dt.UTC).isoformat(),
+                "actual_local": local(actual, "%H:%M"),
+                "actual_date_local": local(actual, "%Y-%m-%d"),
+                "sources": sources,
+            }
+        )
+
+    return {
+        "generated_utc": dt.datetime.now(dt.UTC).isoformat(),
+        "count": len(comparisons),
+        "logging_started_utc": led.started_utc,
+        "comparisons": comparisons,
+    }
 
 
 def get_health(db_path=DB_PATH) -> dict[str, Any]:

@@ -2,6 +2,8 @@
 data/raw/
 data/*.duckdb
 data/*.duckdb.wal
+# Local scoreboard ledger; deployed instances keep theirs in R2.
+data/ledger.json
 
 # Python
 .venv/

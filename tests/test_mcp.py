@@ -8,7 +8,13 @@ import pytest
 from geyser_ai.config import TARGET_GEYSERS
 from geyser_ai.mcp_server import mcp
 
-EXPECTED = {"get_predictions", "get_recent_eruptions", "get_geyser_stats"}
+EXPECTED = {
+    "get_predictions",
+    "get_recent_eruptions",
+    "get_geyser_stats",
+    "get_scoreboard",
+    "get_recent_comparisons",
+}
 
 
 def run(coro):
@@ -30,7 +36,7 @@ class TestSchemas:
 
     def test_geyser_arguments_are_enumerated(self, tools):
         """Enumerated names stop a model inventing 'Old Faithfull'."""
-        for name in ("get_predictions", "get_recent_eruptions", "get_geyser_stats"):
+        for name in EXPECTED:
             schema = tools[name].input_schema
             prop = schema["properties"]["geyser"]
             blob = str(prop)
