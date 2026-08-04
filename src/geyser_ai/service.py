@@ -529,6 +529,7 @@ def _summarise(
         return median(lows), median(highs)
 
     lo, hi = half_widths("window_open_epoch", "window_close_epoch")
+    inner_lo, inner_hi = half_widths("inner_open_epoch", "inner_close_epoch")
     inner_widths = [
         (r.inner_close_epoch - r.inner_open_epoch) / 60.0
         for r in mine
@@ -554,6 +555,10 @@ def _summarise(
         "n_in_50": n_in_50 if inner else None,
         "n_inner": len(inner) or None,
         "median_window_50_width_min": median(inner_widths),
+        # Both edges, so the inner band can be drawn where it actually sat
+        # rather than assumed symmetric about the prediction.
+        "median_window_50_lo_min": inner_lo,
+        "median_window_50_hi_min": inner_hi,
     }
 
 

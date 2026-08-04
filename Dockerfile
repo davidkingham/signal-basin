@@ -18,15 +18,16 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# Dependencies first so the slow resolve+install layer is cached across code
-# changes. --frozen keeps the deployed set identical to uv.lock. The uv cache
-# lives on a build mount so it never lands in an image layer.
+# Dependencies ONLY, and deliberately never the project itself.
+#
+# The virtualenv is ~870 MB. If installing the project touched it, every
+# one-line source change would produce a new 870 MB layer to push, which on a
+# flaky link is both slow and a reliable way to fail a deploy. `--frozen` keeps
+# the deployed set identical to uv.lock, and the uv cache lives on a build mount
+# so it never lands in a layer either.
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/tmp/uv-cache \
     uv sync --frozen --no-dev --no-install-project
-
-COPY src ./src
-RUN --mount=type=cache,target=/tmp/uv-cache uv sync --frozen --no-dev
 
 # --------------------------------------------------------------- runtime stage
 FROM python:3.12-slim-bookworm
@@ -40,13 +41,18 @@ RUN useradd --create-home --home-dir /home/geyser --shell /usr/sbin/nologin geys
 WORKDIR /app
 USER geyser
 
-# uv installs the project itself as an editable pointer at /app/src, so both
-# the virtualenv and the source tree have to come across.
+# Dependencies, then source. In that order, and as separate layers: the venv is
+# byte-identical across source changes, so a deploy that only touches Python or
+# the dashboard pushes a few hundred kB instead of most of a gigabyte.
 COPY --from=builder --chown=geyser:geyser /app/.venv /app/.venv
 COPY --chown=geyser:geyser src /app/src
 COPY --chown=geyser:geyser deploy /app/deploy
 
+# The project is not pip-installed at all -- PYTHONPATH is enough to import it,
+# and it keeps the venv independent of the source. Nothing at runtime needs the
+# package metadata; the entrypoint imports `geyser_ai.api` directly.
 ENV PATH="/app/.venv/bin:${PATH}" \
+    PYTHONPATH="/app/src" \
     PYTHONUNBUFFERED=1 \
     GEYSER_AI_DATA_DIR=/data \
     GEYSER_AI_DB=/data/geysertimes.duckdb \

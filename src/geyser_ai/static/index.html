@@ -233,6 +233,9 @@ h2 .h2note{
 .key-row:last-child{padding-bottom:0}
 .key-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .key-desc{font-size:11.5px;color:var(--ink-3);line-height:1.5;margin-top:3px}
+.key-note{font-size:11.5px;color:var(--ink-3);line-height:1.6;margin-top:10px;
+  padding-top:9px;border-top:1px solid var(--line)}
+.key-note b{color:var(--ink-2);font-weight:600}
 
 /* one card per geyser; one block per source inside it */
 .sb{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
@@ -258,6 +261,16 @@ h2 .h2note{
   background:color-mix(in srgb,var(--src) 16%,transparent);
   border-left:1px solid color-mix(in srgb,var(--src) 55%,transparent);
   border-right:1px solid color-mix(in srgb,var(--src) 55%,transparent);}
+/* Only this project states two nested intervals. The outer 90% recedes so the
+   50% reads as the claim, and so a nested band never looks like a second,
+   better window that the single-window sources were not allowed to draw. */
+.plot-band.outer{background:color-mix(in srgb,var(--src) 7%,transparent);
+  border-left-style:dotted;border-right-style:dotted;
+  border-left-color:color-mix(in srgb,var(--src) 32%,transparent);
+  border-right-color:color-mix(in srgb,var(--src) 32%,transparent);}
+.plot-band.inner{background:color-mix(in srgb,var(--src) 26%,transparent);
+  border-left-color:color-mix(in srgb,var(--src) 70%,transparent);
+  border-right-color:color-mix(in srgb,var(--src) 70%,transparent);}
 .plot-zero{position:absolute;top:0;bottom:0;left:50%;width:1px;background:var(--ink-3)}
 /* The actual eruption is the one fixed fact a comparison row is built around,
    and it sits at the same x in every lane — so it is drawn heavier than a mere
@@ -765,6 +778,14 @@ function bandOf(s){
   const w = s.median_window_width_min;
   return (w != null && w > 0) ? [-w/2, w/2] : null;
 }
+
+/* The inner 50% interval, for the one source that states one. */
+function innerBandOf(s){
+  const lo = s.median_window_50_lo_min, hi = s.median_window_50_hi_min;
+  if (lo != null && hi != null && (lo > 0 || hi > 0)) return [-lo, hi];
+  const w = s.median_window_50_width_min;
+  return (w != null && w > 0) ? [-w/2, w/2] : null;
+}
 const leadText = m => m < 60 ? `${Math.round(m)}m`
   : `${Math.floor(m/60)}h ${String(Math.round(m%60)).padStart(2,"0")}m`;
 
@@ -781,11 +802,15 @@ const pos = (m, span) => Math.max(0, Math.min(100, 50 + (m/span)*50));
 
 function plot(span, o){
   let h = "";
-  if (o.band){
-    const a = pos(o.band[0], span), b = pos(o.band[1], span);
-    h += `<span class="plot-band" style="left:${a.toFixed(2)}%;width:${
+  // Outer first so the inner 50% sits on top of it. A source with one stated
+  // window passes only `band` and gets exactly one, undecorated.
+  const drawBand = (range, cls) => {
+    const a = pos(range[0], span), b = pos(range[1], span);
+    h += `<span class="plot-band${cls}" style="left:${a.toFixed(2)}%;width:${
       Math.max(b-a, 0.8).toFixed(2)}%"></span>`;
-  }
+  };
+  if (o.band) drawBand(o.band, o.innerBand ? " outer" : "");
+  if (o.innerBand) drawBand(o.innerBand, " inner");
   // Zero is drawn over the band and under the marks. What zero *means* is the
   // caller's to say — a prediction, or the eruption that actually happened.
   h += `<span class="plot-zero${o.zero ? " " + o.zero : ""}"></span>`;
@@ -818,7 +843,17 @@ function renderKey(sources){
           <span class="chip">${esc(s.window_label)} window</span>
         </div>
         ${s.description ? `<div class="key-desc">${esc(s.description)}</div>` : ""}
-      </div>`).join("") + `</div>`;
+      </div>`).join("") + `</div>`
+    // Why one source's lane has two bands and the others have one. Without
+    // this, a nested band reads as a second, tighter window the single-window
+    // sources were simply not allowed to draw.
+    + `<div class="key-note">Geyser AI is a distribution, so its lane shows
+       <b>two nested bands</b>: the solid inner one is its 50% interval, the
+       faint dotted outer one its 90%. The NPS and Geysers.net each publish a
+       single stated window, so they draw <b>one band</b> — the one they
+       committed to. The extra band is more detail about the same forecast, not
+       a wider set of chances to be right: each source's in-window rate is
+       scored only against the window it states.</div>`;
 }
 
 /* ── per-geyser rows ────────────────────────────────────── */
@@ -866,6 +901,7 @@ function sbSource(meta, s, span){
 
   const p = plot(span, {
     band: bandOf(s),
+    innerBand: innerBandOf(s),
     bar:  s.mae_min != null ? [-s.mae_min, s.mae_min] : null,
     caps: true,
     dot:  s.median_signed_error_min,
@@ -935,15 +971,17 @@ function renderScoreboard(d, sources){
 /* Window edges as minutes either side of the prediction. Measured from the UTC
    pair, not the displayed HH:MM, so a window spanning midnight or a daylight
    saving change cannot be silently folded onto the wrong day. */
-function winOffsets(s){
+function winOffsets(s, field){
   const p = Date.parse(s.predicted_utc);
-  if (s.window_utc && s.window_utc.length === 2 && !isNaN(p)){
-    const a = (Date.parse(s.window_utc[0]) - p) / 60000;
-    const b = (Date.parse(s.window_utc[1]) - p) / 60000;
+  const pair = s[field];
+  if (pair && pair.length === 2 && !isNaN(p)){
+    const a = (Date.parse(pair[0]) - p) / 60000;
+    const b = (Date.parse(pair[1]) - p) / 60000;
     if (!isNaN(a) && !isNaN(b) && b > a) return [a, b];
   }
-  // No explicit edges: fall back to the stated width, centred.
-  if (s.window_width_min != null && s.window_width_min > 0)
+  // No explicit edges: fall back to the stated width, centred. Only the outer
+  // window has a width to fall back on.
+  if (field === "window_utc" && s.window_width_min != null && s.window_width_min > 0)
     return [-s.window_width_min/2, s.window_width_min/2];
   return null;
 }
@@ -969,11 +1007,13 @@ function cmpCard(c, sources){
     const s = c.sources ? c.sources[meta.key] : null;
     if (!s) return {meta, s:null};
     const off = predOffset(c, s);
-    const w   = winOffsets(s);
-    const win = (w && off != null) ? [off + w[0], off + w[1]] : null;
+    const shift = (w) => (w && off != null) ? [off + w[0], off + w[1]] : null;
+    const win = shift(winOffsets(s, "window_utc"));
+    // Only this project publishes a second, inner interval.
+    const win50 = shift(winOffsets(s, "window_50_utc"));
     if (off != null) span = Math.max(span, Math.abs(off));
     if (win) span = Math.max(span, Math.abs(win[0]), Math.abs(win[1]));
-    return {meta, s, off, win};
+    return {meta, s, off, win, win50};
   });
   // One span, computed across every lane, handed to all of them unchanged.
   span = niceSpan(span * 1.15);
@@ -1007,11 +1047,16 @@ function cmpCard(c, sources){
              }window ran from ${sgn(L.win[0])} to ${sgn(L.win[1])} min around the eruption`
           : "")
       + `; the eruption fell ${L.s.in_window ? "inside" : "outside"} that window`
+      + (L.win50
+          ? `; its inner 50% interval ran from ${sgn(L.win50[0])} to ${sgn(L.win50[1])} min, `
+            + `which the eruption fell ${L.s.in_50 ? "inside" : "outside"}`
+          : "")
       + (L.s.detail ? ` (${L.s.detail})` : "");
 
     return head + `<span class="cl-nums">${nums.join("")}</span></div>`
       + plot(span, {
           band: L.win,
+          innerBand: L.win50,
           // the miss, drawn as the gap between where it said and what happened
           bar:  off != null ? [0, off] : null,
           dot:  off,

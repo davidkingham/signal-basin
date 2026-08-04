@@ -99,6 +99,9 @@ empirical coverage of the nominal 50% and 90% intervals.
 ## Results
 
 Full table and figures: [`reports/calibration_report.md`](reports/calibration_report.md).
+The durable write-up of everything this project has learned — including the
+negative results, the external-forcings literature, and the deployment gotchas —
+lives in [`docs/findings/`](docs/findings/README.md).
 
 Best model per geyser, walk-forward over the last 3 years (CRPS in minutes, lower
 is better):
