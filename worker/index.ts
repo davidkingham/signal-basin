@@ -25,6 +25,12 @@ export { ContainerProxy };
  */
 const SNAPSHOT_HOST = "geyser-snapshot.r2";
 const SNAPSHOT_KEY = "geysertimes.duckdb";
+/**
+ * The snapshot is published as numbered parts plus this manifest, because a
+ * single ~200 MB PUT is unreliable over some networks. The container assembles
+ * them; the whole-object key above stays as a fallback.
+ */
+const SNAPSHOT_MANIFEST_KEY = "snapshot/manifest.json";
 
 /**
  * The container may write only under this prefix. The scoreboard ledger has to
@@ -127,6 +133,7 @@ export class GeyserContainer extends Container<Env> {
   enableInternet = true;
 
   envVars = {
+    GEYSER_AI_SNAPSHOT_MANIFEST_URL: `http://${SNAPSHOT_HOST}/${SNAPSHOT_MANIFEST_KEY}`,
     GEYSER_AI_SNAPSHOT_URL: `http://${SNAPSHOT_HOST}/${SNAPSHOT_KEY}`,
     GEYSER_AI_LEDGER_URL: `http://${SNAPSHOT_HOST}/${LEDGER_KEY}`,
   };

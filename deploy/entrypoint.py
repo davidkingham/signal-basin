@@ -16,6 +16,7 @@ is the same five-minute-TTL `entries_recent` sync the local app already does.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import pathlib
@@ -29,6 +30,10 @@ LOG = logging.getLogger("geyser-ai.entrypoint")
 
 DB_PATH = pathlib.Path(os.environ.get("GEYSER_AI_DB", "/data/geysertimes.duckdb"))
 SNAPSHOT_URL = os.environ.get("GEYSER_AI_SNAPSHOT_URL", "").strip()
+# Preferred source: a manifest naming N part objects to concatenate. Publishing
+# ~200 MB as one object is unreliable on some networks, so the parts are
+# uploaded separately and stitched back together here.
+MANIFEST_URL = os.environ.get("GEYSER_AI_SNAPSHOT_MANIFEST_URL", "").strip()
 # Binds all interfaces because the container's port is only reachable through
 # the Worker in front of it, never from the public internet directly.
 HOST = os.environ.get("GEYSER_AI_HOST", "0.0.0.0")
@@ -59,21 +64,63 @@ def _download(url: str, dest: pathlib.Path) -> int:
     return total
 
 
+def _get_json(url: str) -> dict:
+    req = urllib.request.Request(url, headers={"User-Agent": "geyser-ai-container"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read())
+
+
+def _download_parts(manifest_url: str, dest: pathlib.Path) -> int:
+    """Concatenate the parts named by a manifest into `dest`, atomically."""
+    manifest = _get_json(manifest_url)
+    n_parts = int(manifest["parts"])
+    expected = int(manifest["bytes"])
+    base = manifest_url.rsplit("/", 1)[0]
+
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    tmp.unlink(missing_ok=True)
+    total = 0
+    with tmp.open("wb") as out:
+        for index in range(n_parts):
+            url = f"{base}/part-{index:04d}"
+            req = urllib.request.Request(url, headers={"User-Agent": "geyser-ai-container"})
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                while chunk := resp.read(CHUNK):
+                    out.write(chunk)
+                    total += len(chunk)
+
+    if total != expected:
+        tmp.unlink(missing_ok=True)
+        raise OSError(f"assembled {total} bytes from {n_parts} parts, manifest says {expected}")
+    os.replace(tmp, dest)
+    return total
+
+
 def fetch_snapshot() -> None:
     """Populate DB_PATH from object storage. Runs on a background thread."""
     if DB_PATH.exists():
         LOG.info("snapshot already present at %s, skipping download", DB_PATH)
         return
-    if not SNAPSHOT_URL:
-        LOG.warning("GEYSER_AI_SNAPSHOT_URL is unset and %s is missing", DB_PATH)
+    if not MANIFEST_URL and not SNAPSHOT_URL:
+        LOG.warning("no snapshot URL configured and %s is missing", DB_PATH)
         return
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(1, MAX_ATTEMPTS + 1):
         started = time.monotonic()
         try:
-            size = _download(SNAPSHOT_URL, DB_PATH)
-        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            if MANIFEST_URL:
+                try:
+                    size = _download_parts(MANIFEST_URL, DB_PATH)
+                except urllib.error.HTTPError as exc:
+                    if exc.code != 404 or not SNAPSHOT_URL:
+                        raise
+                    # No manifest published yet: fall back to the whole object.
+                    LOG.info("no snapshot manifest, falling back to %s", SNAPSHOT_URL)
+                    size = _download(SNAPSHOT_URL, DB_PATH)
+            else:
+                size = _download(SNAPSHOT_URL, DB_PATH)
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError, KeyError) as exc:
             LOG.warning("snapshot fetch attempt %d/%d failed: %s", attempt, MAX_ATTEMPTS, exc)
             if attempt == MAX_ATTEMPTS:
                 LOG.error("giving up on snapshot; the API will keep returning 503")
