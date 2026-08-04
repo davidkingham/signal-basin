@@ -78,6 +78,8 @@ const MAX_CACHEABLE_BYTES = 1_000_000;
  * lapses the container stops being touched and `sleepAfter` puts it to sleep.
  */
 const ACTIVE_WINDOW_MS = 10 * 60_000;
+/** How often interest in an endpoint is re-recorded. Keeps reads off the write path. */
+const ACTIVITY_WRITE_INTERVAL_MS = 60_000;
 /**
  * Most endpoints the cron will refresh in one run, newest interest first. The
  * dashboard asks for four, so this leaves room for a detail view alongside.
@@ -158,12 +160,20 @@ export class GeyserContainer extends Container<Env> {
       this.ctx.storage.get<Activity>(ACTIVITY_KEY),
     ]);
 
+    // Writing on every read costs seconds, not milliseconds: a durable write
+    // queues behind whatever else this Durable Object is doing, and this one is
+    // also running a twenty-second container recompute on the cron. The cron
+    // only needs to know somebody was here recently, so recording it once a
+    // minute is exactly as useful and leaves the read path a pure read.
     const now = Date.now();
-    const next: Activity = { ...(activity ?? {}), [key]: { url, lastSeen: now } };
-    for (const [k, v] of Object.entries(next)) {
-      if (now - v.lastSeen > ACTIVE_WINDOW_MS) delete next[k];
+    const seen = activity?.[key]?.lastSeen ?? 0;
+    if (now - seen > ACTIVITY_WRITE_INTERVAL_MS) {
+      const next: Activity = { ...(activity ?? {}), [key]: { url, lastSeen: now } };
+      for (const [k, v] of Object.entries(next)) {
+        if (now - v.lastSeen > ACTIVE_WINDOW_MS) delete next[k];
+      }
+      await this.ctx.storage.put(ACTIVITY_KEY, next);
     }
-    await this.ctx.storage.put(ACTIVITY_KEY, next);
 
     return entry;
   }
