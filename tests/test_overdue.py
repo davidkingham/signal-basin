@@ -23,6 +23,7 @@ import datetime as dt
 
 import numpy as np
 import pytest
+from scipy import stats
 
 from geyser_ai.backtest import load_intervals
 from geyser_ai.models import fit_tail_mixture, renewal_forecast
@@ -165,3 +166,62 @@ class TestTailMixture:
         mix = fit_tail_mixture(np.random.default_rng(3).lognormal(np.log(100), 0.05, 3000))
         s = mix.rvs(40000, random_state=np.random.default_rng(4))
         assert (s < mix.ppf(0.5)).mean() == pytest.approx(0.5, abs=0.02)
+
+
+class TestOvernightGapIsNotOverdue:
+    """Regression: a geyser silent overnight must not be called overdue by day.
+
+    Reported from the deployed dashboard the morning Fountain was added: 12
+    hours without a report, and the page said "overdue". The completeness was
+    being evaluated at the PRESENT instant -- 9am, gazers logging all over the
+    basin, p_obs 0.995 -- and applied to the whole silent window, so the model
+    concluded nothing could have been missed and the geyser must be running 12
+    hours late. The eruptions were missed at 2am, when p_obs was nowhere near
+    0.995; the weighting has to be evaluated at the hour each simulated missed
+    eruption would have occurred.
+    """
+
+    # Day-watched profile: near-certain logging 8am-8pm, near-nothing at night.
+    PROFILE = np.array([0.1] * 7 + [0.9] * 13 + [0.2, 0.1, 0.1, 0.1])
+
+    @staticmethod
+    def _base():
+        """The production shape: a sharp fit widened by the tail component.
+
+        A bare lognormal does not reproduce the bug -- at 2.2x the median,
+        "running late" is a 3.9-sigma event and the missed-eruption branch wins
+        even at p_obs 0.995. Production serves the tail-widened mixture, whose
+        heavy tail keeps "late" plausible enough for survival to win; the test
+        must stand on the same distribution.
+        """
+        from geyser_ai.models import TailMixture
+
+        return TailMixture(
+            stats.lognorm(s=0.20, scale=340.0), stats.lognorm(s=0.40, scale=340.0), 0.15
+        )
+
+    def test_overnight_silence_concludes_missed_not_overdue(self):
+        # Anchor 9pm, examined 12.3 h later at ~9:20am.
+        pred, missed, p_current = renewal_forecast(
+            self._base(), 740.0, self.PROFILE, anchor_hour=21.0, n_sims=30000
+        )
+        assert p_current < 0.1, (
+            f"overnight eruptions were cheap to miss; current-cycle stayed at {p_current:.2f}"
+        )
+        assert missed > 1.0, f"a ~5.7 h geyser silent 12.3 h missed >=1 (got {missed:.1f})"
+        assert pred.median() > 740.0, "the forecast must still point at the future"
+
+    def test_instantaneous_scalar_reproduces_the_bug(self):
+        """The trap, kept executable: score the same window with 'now' p_obs."""
+        _, _, p_current = renewal_forecast(self._base(), 740.0, 0.995, n_sims=30000)
+        assert p_current > 0.5, "with p_obs=0.995 the model insists nothing was missed"
+
+    def test_watched_daytime_window_still_reads_overdue(self):
+        """The dual invariant: a geyser late across WATCHED hours is overdue."""
+        # Anchor 9am, examined ~6.7 h later mid-afternoon: whole window watched.
+        _, _, p_current = renewal_forecast(
+            self._base(), 400.0, self.PROFILE, anchor_hour=9.0, n_sims=30000
+        )
+        assert p_current > 0.5, (
+            f"every hour of this window was watched; a miss is implausible ({p_current:.2f})"
+        )

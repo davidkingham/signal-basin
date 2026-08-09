@@ -125,6 +125,86 @@ def basin_activity(t_epoch: int | None = None, db_path=DB_PATH) -> int:
     return int(n)
 
 
+def hourly_logging_profile(
+    geyser: str,
+    t_epoch: int | None = None,
+    db_path=DB_PATH,
+    use_live_activity: bool = True,
+) -> tuple[np.ndarray, dict]:
+    """P(an eruption occurring at local hour h would be logged), length 24.
+
+    `hourly_observation_rate` buckets validity by the ANCHOR's hour, which
+    answers "was the NEXT eruption logged" -- the right quantity attributed to
+    the wrong clock position: the miss happens hours after the anchor, and
+    survivorship keeps its night buckets high (the only people logging 2am
+    anchors are all-night gazers who also catch the next one; Fountain's 2am
+    bucket reads 0.83 while nobody is there). Weighting missed eruptions needs
+    the probability at the hour the eruption would have OCCURRED.
+
+    Geysers do not keep clock time, so true eruptions are ~uniform over the 24
+    hours and the density of logged entries by hour is proportional to exactly
+    that probability. Scaled so the daily mean equals the geyser's overall
+    single-interval share, the units match the scalar estimate. Live basin
+    activity lifts only the CURRENT hour: gazers present now say nothing about
+    who was watching at 3am.
+    """
+    t = t_epoch if t_epoch is not None else int(dt.datetime.now(dt.UTC).timestamp())
+    local = dt.datetime.fromtimestamp(t, dt.UTC).astimezone(dt.timezone(dt.timedelta(hours=-6)))
+    season = 0 if local.month in (5, 6, 7, 8, 9) else 1
+
+    key = f"profile:{geyser}:{season}:{db_path}"
+    with _lock:
+        cached = _cache.get(key)
+    if cached is None:
+        con = duckdb.connect(str(db_path), read_only=True)
+        try:
+            df = con.execute(
+                """
+                SELECT prev_hour_local AS hr, count(*) AS n
+                FROM intervals
+                WHERE geyser = ? AND year_local >= 2015 AND prev_hour_local IS NOT NULL
+                  AND (CASE WHEN month_local IN (5,6,7,8,9) THEN 0 ELSE 1 END) = ?
+                GROUP BY 1
+                """,
+                [geyser, season],
+            ).df()
+            overall = con.execute(
+                """
+                SELECT avg(CASE WHEN is_valid THEN 1.0 ELSE 0.0 END)
+                FROM intervals WHERE geyser = ? AND year_local >= 2015
+                """,
+                [geyser],
+            ).fetchone()[0]
+        except duckdb.Error:
+            overall, df = None, None
+        finally:
+            con.close()
+
+        base = float(overall) if overall is not None else 0.9
+        counts = np.ones(24)  # pseudo-count so an empty hour is rare, not impossible
+        if df is not None and not df.empty:
+            for _, r in df.iterrows():
+                counts[int(r["hr"])] += float(r["n"])
+        cached = np.clip(base * counts * 24.0 / counts.sum(), 0.05, _MAX_P_OBS)
+        with _lock:
+            _cache[key] = cached
+
+    profile = cached.copy()
+    detail = {
+        "season": "warm" if season == 0 else "cold",
+        "profile_mean": round(float(profile.mean()), 3),
+        "profile_night_min": round(float(profile.min()), 3),
+    }
+    if use_live_activity:
+        n = basin_activity(t, db_path)
+        detail["basin_entries_45min"] = n
+        if n > 0:
+            live = _MIN_P_OBS + (_MAX_P_OBS - _MIN_P_OBS) * min(n / _ACTIVITY_SATURATION, 1.0)
+            profile[local.hour] = max(profile[local.hour], live)
+            detail["live_hour_lift"] = round(live, 3)
+    return profile, detail
+
+
 def observation_completeness_at(
     geyser: str,
     t_epoch: int | None = None,

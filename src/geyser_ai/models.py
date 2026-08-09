@@ -697,10 +697,11 @@ def fit_tail_mixture(intervals: np.ndarray, window: int = 100, w_wide: float = 0
 def renewal_forecast(
     dist: stats.rv_continuous,
     age_min: float,
-    p_obs: float,
+    p_obs: float | np.ndarray,
     n_sims: int = 40_000,
     seed: int = 0,
     rest_dist: stats.rv_continuous | None = None,
+    anchor_hour: float | None = None,
 ) -> tuple[SamplePrediction, float]:
     """Distribution of the next eruption given nothing has been LOGGED for `age_min`.
 
@@ -734,13 +735,28 @@ def renewal_forecast(
     anchor's covariates (e.g. a post-minor branch fit). Intervals after the
     first simulated eruption follow an eruption whose branch is unknown, so they
     are drawn from `rest_dist` -- the unconditional distribution -- when given.
+
+    `p_obs` may be a scalar, or a length-24 vector of per-local-hour logging
+    probabilities with `anchor_hour` giving the anchor's local clock hour. The
+    scalar form asks "would we have seen it?" once, for the whole silent
+    window -- which is wrong whenever the window spans the night: evaluated at
+    9am with gazers everywhere it says 0.995, and a 12-hour-silent Fountain
+    comes out "overdue" instead of "the 2am eruption went unlogged". The vector
+    form weights each simulated missed eruption by the observation probability
+    AT THE HOUR IT WOULD HAVE OCCURRED, which is the question the renewal
+    process actually poses.
     """
     rng = np.random.default_rng(seed)
     if rest_dist is None:
         rest_dist = dist
     # Cap p_obs: at exactly 1.0 every stale-data path gets zero weight and the
     # forecast degenerates. 0.995 keeps survival dominant without collapsing.
-    p_obs = float(min(max(p_obs, 0.05), 0.995))
+    p_arr = np.clip(np.asarray(p_obs, dtype=float), 0.05, 0.995)
+    hourly = p_arr.ndim == 1
+    if hourly and len(p_arr) != 24:
+        raise ValueError(f"hourly p_obs must have length 24, got {len(p_arr)}")
+    if hourly and anchor_hour is None:
+        raise ValueError("hourly p_obs requires anchor_hour")
 
     # Draw generously; paths need enough intervals to cross `age_min`. Chain
     # length is governed by the marginal, not the (possibly short) first branch.
@@ -753,14 +769,19 @@ def renewal_forecast(
 
     cum = np.cumsum(draws, axis=1)
     # k = eruptions that fell inside the silent window (these were missed)
-    k = (cum < age_min).sum(axis=1)
+    missed = cum < age_min
+    k = missed.sum(axis=1)
     ok = k < max_steps
     if not ok.any():
         k = np.minimum(k, max_steps - 1)
         ok = np.ones_like(k, dtype=bool)
     next_time = cum[np.arange(n_sims), np.minimum(k, max_steps - 1)]
 
-    log_w = k * np.log1p(-p_obs)
+    if hourly:
+        p_at = p_arr[((float(anchor_hour) + cum / 60.0) % 24).astype(int)]
+        log_w = np.sum(np.log1p(-p_at) * missed, axis=1)
+    else:
+        log_w = k * np.log1p(-float(p_arr))
     log_w -= log_w.max()
     w = np.exp(log_w) * ok
     if w.sum() <= 0:

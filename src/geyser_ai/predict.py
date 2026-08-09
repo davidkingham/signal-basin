@@ -14,7 +14,7 @@ from .models import (
     fit_tail_mixture,
     renewal_forecast,
 )
-from .observation import observation_completeness_at
+from .observation import hourly_logging_profile, observation_completeness_at
 
 
 def _anchor(geyser: str, db_path=DB_PATH) -> pd.Series | None:
@@ -150,7 +150,17 @@ def predict_geyser(
     # Observation-aware: a well-watched geyser running late is overdue, not
     # missed. A single per-geyser constant made the forecast jump a whole cycle
     # the moment a closely-watched geyser passed its median.
+    #
+    # The completeness must be evaluated at the hour each missed eruption would
+    # have OCCURRED, not at the present instant. Evaluated "now", a 12-hour
+    # overnight gap at Fountain scored p_obs 0.995 -- morning gazers were
+    # logging all over the basin -- and the forecast called it overdue instead
+    # of concluding the 2am eruption went unlogged.
     p_obs, p_obs_detail = observation_completeness_at(geyser, db_path=db_path)
+    p_profile, profile_detail = hourly_logging_profile(geyser, db_path=db_path)
+    p_obs_detail["window_profile"] = profile_detail
+    anchor_local = last_ts.tz_convert("America/Denver")
+    anchor_hour = float(anchor_local.hour) + float(anchor_local.minute) / 60.0
     # Widen the model's fit so being late is surprising, not impossible -- but
     # keep it ANCHORED on that fit. An earlier version substituted the
     # unconditional marginal here, which silently discarded the conditional
@@ -162,7 +172,11 @@ def predict_geyser(
     # Past the first simulated eruption the branch is unknown again, so chained
     # missed-eruption draws revert to the marginal.
     rpred, exp_missed, p_current = renewal_forecast(
-        base_dist, max(age_min, 0.0), p_obs, rest_dist=marginal or base_dist
+        base_dist,
+        max(age_min, 0.0),
+        p_profile,
+        rest_dist=marginal or base_dist,
+        anchor_hour=anchor_hour,
     )
     med = rpred.median()
     lo50, hi50 = rpred.interval(0.50)
@@ -181,7 +195,13 @@ def predict_geyser(
         "observation_detail": p_obs_detail,
         "expected_missed_eruptions": round(exp_missed, 2),
         "current_cycle_prob": round(p_current, 3),
-        "overdue": bool(age_min > float(base_dist.ppf(0.5)) and p_current > 0.1),
+        # "Overdue" asserts the geyser is still in its current cycle, so it must
+        # be the DOMINANT hypothesis, not merely non-negligible. At 0.1 Castle
+        # wore an "expected any minute" badge while the model itself said 74%
+        # missed-overnight (and the empirical post-major tail past that age is
+        # 0.3%). Past the median with p_current <= 0.5, the story is "likely
+        # unlogged", which the stale/expected-missed fields already tell.
+        "overdue": bool(age_min > float(base_dist.ppf(0.5)) and p_current > 0.5),
         "data_is_stale": bool(stale),
         "median_interval_min": round(med, 1),
         "interval_50_min": [round(lo50, 1), round(hi50, 1)],

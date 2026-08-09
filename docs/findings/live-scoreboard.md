@@ -99,6 +99,58 @@ with Old Faithful's branch structure whose last eruption is a minor: the old
 path serves 91.8 where the branch answer is 70.2; the new path serves the
 branch.
 
+## The second catch: "overdue" at 9am (2026-08-09)
+
+The morning Fountain went live, the dashboard called it **overdue** after a
+12-hour overnight silence — exactly the failure the renewal forecast exists to
+prevent, live on the front page.
+
+The mechanism: observation completeness was evaluated **at the present
+instant** and applied to the whole silent window. At 9am with 11 basin entries
+in 45 minutes, live activity said `p_obs = 0.995`; at 0.995 a missed eruption
+carries weight 0.005, so the model concluded nothing could have been missed
+and Fountain must be running 12 hours late. The eruptions were missed at
+~2am, when nobody was at Fountain Paint Pots. The seven original geysers never
+tripped this because their data is never 12 hours stale in season — Fountain
+is the first target sparse enough to expose it, on day one.
+
+A second trap underneath: the existing hourly table (`hourly_observation_rate`)
+could not correct this, because it buckets *validity by the anchor's hour* —
+survivorship keeps its night buckets high (Fountain's 2am bucket reads 0.83;
+the only people logging 2am anchors are all-night gazers who also catch the
+next one).
+
+**The fix**: `hourly_logging_profile` estimates P(an eruption at local hour h
+gets logged) from entry *density* by clock hour — geysers don't keep clock
+time, so logged-entry density by hour is proportional to exactly this — and
+`renewal_forecast` now weights each simulated missed eruption by the
+probability **at the hour it would have occurred**, with live basin activity
+lifting only the current hour. Fountain's warm-season profile: 0.35–0.43 at
+night, ~0.99 through the watched day. Same 12-hour window after the fix:
+current-cycle probability 0.007, ~1.7 eruptions missed, overdue **false**,
+next predicted about an interval after the inferred overnight eruption.
+Regression-tested in `test_overdue.py::TestOvernightGapIsNotOverdue`, including
+the executable form of the trap and the dual invariant (a geyser late across
+*watched* hours must still read overdue). Note the bug only reproduces on the
+tail-widened mixture production actually serves — on a bare lognormal the
+missed-eruption branch wins even at p_obs 0.995, which is itself a lesson in
+testing against the served distribution.
+
+**Coda, same day**: Castle then wore the "overdue — expected any minute" badge
+at 27 h post-major (1.5× its 18 h median) *with the fix active*. Not the same
+bug — Castle's night logging is real (26.6% of its entries land 23:00–05:59;
+it is webcam-visible), so the model kept 26% on "still in cycle" — but the
+`overdue` flag fired on `p_current > 0.1`, asserting a hypothesis the model
+itself rejected at 3-to-1, and one the empirical record prices at 0.3% (16 of
+4,772 post-major intervals since 2015 reached 26.9 h). The flag now requires
+the current-cycle hypothesis to be **dominant** (`p_current > 0.5`): a watched
+geyser running late keeps its badge, because while people are watching, misses
+are near-impossible and p_current stays high; a plausibly-missed one reads
+"likely unlogged" instead. Left open, deliberately: the tail mixture gives
+"27 h late" a ~4% prior against Castle's empirical 0.3% — the wide component
+may be too heavy for the long-interval geysers, but that is a calibration
+question for the backtest, not a badge question.
+
 ## Footnotes for data-quality.md
 
 - The ledger scored an Old Faithful eruption at 08-06 15:32 UTC that no longer
