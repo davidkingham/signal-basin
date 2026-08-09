@@ -14,6 +14,7 @@ client = TestClient(app)
 PREDICTION_KEYS = {
     "geyser",
     "model",
+    "explain",
     "last_eruption_utc",
     "last_eruption_local",
     "data_age_hours",
@@ -55,6 +56,18 @@ class TestPredictions:
     def test_contract_keys(self):
         p = client.get("/api/predictions?points=16").json()["predictions"][0]
         assert set(p) >= PREDICTION_KEYS, f"missing: {PREDICTION_KEYS - set(p)}"
+
+    def test_explain_block_shape(self):
+        """The "why this time?" panel renders these verbatim; they must exist."""
+        for p in client.get("/api/predictions?points=16").json()["predictions"]:
+            if "error" in p:
+                continue
+            ex = p["explain"]
+            assert {"entry_type"} <= set(ex["anchor"])
+            assert ex["anchor"]["entry_type"] in ("in-person", "webcam", "electronic logger")
+            if "branch" in ex:
+                assert ex["branch"]["condition"] in ("after a minor", "after a full eruption")
+                assert 0 < ex["branch"]["n_branch"] <= ex["branch"]["n_window"]
 
     def test_windows_nested_and_ordered(self):
         for p in client.get("/api/predictions?points=16").json()["predictions"]:

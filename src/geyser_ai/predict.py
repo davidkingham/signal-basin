@@ -9,6 +9,7 @@ import pandas as pd
 from .backtest import load_intervals
 from .config import DB_PATH, TARGET_GEYSERS
 from .models import (
+    MINOR_MODE_GEYSERS,
     default_model_name,
     default_models,
     fit_tail_mixture,
@@ -182,6 +183,41 @@ def predict_geyser(
     lo50, hi50 = rpred.interval(0.50)
     lo90, hi90 = rpred.interval(0.90)
 
+    # Everything a "why this time?" panel needs, stated from the same values
+    # the forecast was actually computed from. Trust is the product here: a
+    # gazer who can see the anchor entry, which branch fired and on how much
+    # data, and what the model concluded about the silent window can check the
+    # reasoning against their own eyes. Nothing in this block is recomputed or
+    # approximated -- it is the prediction's own working, shown.
+    entry_type = (
+        "electronic logger"
+        if bool(last.get("electronic", False))
+        else "webcam"
+        if bool(last.get("webcam", False))
+        else "in-person"
+    )
+    explain: dict = {
+        "anchor": {
+            "eruption_id": int(last["eruption_id"]) if pd.notna(last.get("eruption_id")) else None,
+            "entry_type": entry_type,
+            "flags": [
+                f
+                for f in ("major", "minor", "approximate", "in_eruption")
+                if bool(last.get(f, False))
+            ],
+        },
+    }
+    if geyser in MINOR_MODE_GEYSERS and "prev_minor" in hist.columns:
+        # The branch the conditional model selected, with the evidence behind
+        # it: how many recent post-minor / post-major intervals it was fit on.
+        recent_flags = hist.tail(400)["prev_minor"].astype(bool)
+        was_minor = bool(row["prev_minor"])
+        explain["branch"] = {
+            "condition": "after a minor" if was_minor else "after a full eruption",
+            "n_branch": int((recent_flags == was_minor).sum()),
+            "n_window": int(len(recent_flags)),
+        }
+
     # Flag the regime so the caller knows which answer they are looking at.
     stale = exp_missed >= 0.5
     result = {
@@ -193,6 +229,7 @@ def predict_geyser(
         "n_training_intervals": int(len(hist)),
         "observation_completeness": round(p_obs, 3),
         "observation_detail": p_obs_detail,
+        "explain": explain,
         "expected_missed_eruptions": round(exp_missed, 2),
         "current_cycle_prob": round(p_current, 3),
         # "Overdue" asserts the geyser is still in its current cycle, so it must

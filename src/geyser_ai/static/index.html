@@ -177,6 +177,27 @@ button.theme:focus-visible{outline:2px solid var(--pool-500);outline-offset:2px}
 .chip.warn{border-color:var(--amber);color:var(--amber)}
 .chip.stale{border-color:var(--mat);color:var(--mat)}
 
+/* "why this time?" — the prediction's own working, shown on demand */
+details.why{margin-top:10px;border-top:1px dashed var(--line);padding-top:7px}
+details.why summary{
+  cursor:pointer;list-style:none;user-select:none;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);
+}
+details.why summary::before{content:"▸ "}
+details.why[open] summary::before{content:"▾ "}
+details.why summary:hover{color:var(--brand)}
+details.why p{margin:7px 0 0;font-size:12.5px;line-height:1.5;color:var(--ink-2)}
+details.why p.aside{color:var(--ink-3);font-size:11.5px}
+details.why a{color:var(--brand);text-decoration:none}
+.hyp{margin-top:9px;display:flex;flex-direction:column;gap:7px}
+.hyp-row{display:grid;grid-template-columns:38px 1fr;gap:8px;font-size:12.5px;color:var(--ink-2)}
+.hyp-row b{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-3);font-weight:600}
+.hyp-row.lead b{color:var(--ink)}
+.hyp-row .bar{grid-column:2;height:3px;border-radius:2px;background:var(--line);overflow:hidden}
+.hyp-row .bar i{display:block;height:100%;background:var(--pool-300)}
+.hyp-row.missed .bar i{background:var(--amber)}
+
 /* ── recent feed ────────────────────────────────────────── */
 h2{
   font-size:11.5px;font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;
@@ -621,6 +642,72 @@ function ribbon(p){
   return svg;
 }
 
+/* ── "why this time?" ──────────────────────────────────────
+   Everything here restates the numbers the forecast was computed from --
+   nothing is re-derived in the browser. Honesty is the feature: the anchor
+   entry (linked to GeyserTimes), which branch fired and on how much data,
+   and the model's own split between "still in cycle" and "already went,
+   unseen" when the data is stale. */
+function fmtDur(m){
+  if (m == null || !isFinite(m)) return "?";
+  // Break at 3 h, not sooner: Old Faithful talk is in minutes ("105 min", not
+  // "1.8 h"), and a 98 min–112 min pair must not straddle two units.
+  return m < 180 ? `${Math.round(m)} min` : `${(m/60).toFixed(1)} h`;
+}
+
+function whyPanel(p){
+  const ex = p.explain || {};
+  const parts = [];
+
+  const a = ex.anchor || {};
+  const kind = (a.flags||[]).includes("minor") ? "a <b>minor</b>"
+             : (a.flags||[]).includes("major") ? "a <b>major</b>" : "an eruption";
+  const approx = (a.flags||[]).includes("approximate") ? " (time approximate)" : "";
+  const entry = a.entry_type === "in-person" ? "in person"
+              : a.entry_type ? `by ${a.entry_type}` : "";
+  const idLink = a.eruption_id
+    ? ` · <a href="https://www.geysertimes.org/eruption.php?id=${a.eruption_id}" target="_blank" rel="noopener">GT entry ↗</a>` : "";
+  const when = (p.last_eruption_local||"").replace(/^\d{4}-\d{2}-\d{2} /,"");
+  parts.push(`<p>Anchored on ${kind} at <b>${when}</b>${approx}, logged ${entry}${idLink}.</p>`);
+
+  if (p.naive_interval_50_min){
+    const [lo,hi] = p.naive_interval_50_min;
+    const basis = ex.branch
+      ? `${ex.branch.condition.charAt(0).toUpperCase() + ex.branch.condition.slice(1)}, ${p.geyser} typically goes`
+      : `${p.geyser} typically goes`;
+    const fit = ex.branch
+      ? `fit on ${ex.branch.n_branch} such intervals of its last ${ex.branch.n_window}`
+      : `${(p.n_training_intervals||0).toLocaleString()} intervals of history`;
+    parts.push(`<p>${basis} <b>${fmtDur(p.naive_median_interval_min)}</b> — half of intervals land between ${fmtDur(lo)} and ${fmtDur(hi)} (${fit}).</p>`);
+  }
+
+  const pc = p.current_cycle_prob;
+  if (pc != null && pc < 0.985 && (p.expected_missed_eruptions||0) >= 0.05){
+    const rows = [
+      { pct: 1-pc, cls: "missed",
+        txt: `already erupted, unseen (~${p.expected_missed_eruptions.toFixed(1)} missed) — next most likely ${hhmm(p.predicted_utc)}` },
+      { pct: pc, cls: "",
+        txt: "still in this cycle — could go any time" },
+    ].sort((x,y) => y.pct - x.pct);
+    parts.push(`<div class="hyp">${rows.map((r,i) => `
+      <div class="hyp-row ${r.cls}${i===0?" lead":""}">
+        <b>${Math.round(r.pct*100)}%</b><span>${r.txt}</span>
+        <div class="bar"><i style="width:${Math.max(2, Math.round(r.pct*100))}%"></i></div>
+      </div>`).join("")}</div>`);
+    const wp = (p.observation_detail||{}).window_profile;
+    if (wp && wp.profile_night_min != null && wp.profile_night_min < 0.7){
+      parts.push(`<p class="aside">Overnight logging here is sparse (~${Math.round(wp.profile_night_min*100)}% of night eruptions get reported, vs ~${Math.round(wp.profile_mean*100)}% overall) — a silent night usually means nobody was watching.</p>`);
+    }
+  } else if (pc != null){
+    parts.push(`<p class="aside">Data is fresh — no missed-eruption adjustment in play.</p>`);
+  }
+
+  const d = document.createElement("details");
+  d.className = "why";
+  d.innerHTML = `<summary>why this time?</summary>${parts.join("")}`;
+  return d;
+}
+
 /* ── cards ──────────────────────────────────────────────── */
 function card(p){
   const el = document.createElement("article");
@@ -678,6 +765,7 @@ function card(p){
   }
   add(p.model.replace(/_/g," "));
   el.appendChild(chips);
+  el.appendChild(whyPanel(p));
   return el;
 }
 
@@ -705,8 +793,18 @@ async function load(){
     renderAxis();
 
     const cards = document.getElementById("cards");
+    // The auto-refresh replaces every card; an open "why this time?" panel
+    // must survive it or reading gets interrupted mid-sentence.
+    const openWhy = new Set(
+      [...cards.querySelectorAll("details.why[open]")].map(d => d.closest("article")?.dataset.geyser)
+    );
     cards.innerHTML = "";
-    pr.predictions.forEach(p => cards.appendChild(card(p)));
+    pr.predictions.forEach(p => {
+      const el = card(p);
+      el.dataset.geyser = p.geyser;
+      if (openWhy.has(p.geyser)) el.querySelector("details.why")?.setAttribute("open", "");
+      cards.appendChild(el);
+    });
     renderFeed(ev);
 
     const n = pr.predictions.filter(p => !p.error).length;
