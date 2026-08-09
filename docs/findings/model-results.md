@@ -66,7 +66,16 @@ Two caveats, recorded up front:
 
 The runner-up candidate from the same sweep, **Lion**, was added the next day
 with the series model it needed — see the section below. Ruled out with
-numbers: White Dome (0.297), Aurum (0.319), Sawmill (0.306), Grotto (0.298).
+numbers: White Dome (0.297), Aurum (0.319), Grotto (0.298). **Sawmill's
+entry here deserves a correction made 2026-08-09**: its blanket "0.306" hid
+that in-regime Sawmill is far steadier — tight-mode log-sd **0.251 at a
+165-minute cycle**, statistically tied with Anemone-Little (0.252) and close
+behind Anemone-Big (0.217) as a fraction of cycle length. What keeps it
+unserved is not irregularity but *regime-switching*: only 41% of its gaps sit
+in the cycling mode, and much of the rest is real behavior (deep drains,
+marathon phases of the complex), not missed logging. A future Sawmill model
+needs a regime detector feeding a conditional interval model — Lion's family,
+one rung harder.
 
 **Lone Star is ruled out for a different reason and deserves the precise
 version.** The geyser itself is *more* regular than most of what we serve —
