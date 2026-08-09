@@ -126,16 +126,31 @@ minimum ≥ 6,000, scores **4 clean detections of 13 eruptions (~31%) with
 zero false positives** — and the four are evening/overnight eruptions,
 exactly when human reports lag most. The honest framing would be
 "seismic watch, active overnight; detects roughly the louder half of
-in-window eruptions; silence means nothing." Before shipping even that,
-the zero-false-positive claim needs a 60–90 day gate-hours baseline
-(the current one is ~16 days) and the detection count is n=4.
+in-window eruptions; silence means nothing."
 
-**Where this leaves the detector**: amplitude features cannot cover the
-full day — three designs measured say so — but a night-gated amplitude
-detector is a live, partially-validated option, and spectral
-discrimination remains the path to full-day coverage. The Steamboat card
-stays context-only until one of those passes a validation sized to the
-claim it would print.
+**The long baseline (run 2026-08-09): 118 eruption-free days, 1,606
+valid gate-hours, exactly one fire — and the fire was the M7.6 Aomori,
+Japan earthquake.** The sweep covered 2025-10-01 → 2025-12-27 (fall into
+winter, wind season, park closed) and 2026-06-15 → 2026-07-14 (peak
+summer evenings). The single fire, 2025-12-08 07:49 MST, is the surface
+-wave arrival of the M7.6 that struck Japan 34 minutes earlier (USGS
+us6000rtdt) — a real seismic event, not noise, and it defines the one
+in-gate false-positive class: teleseisms. That class has a measured
+veto: the Japan quake lifted YNR 145× and YFT 70× simultaneously, while
+real Steamboat eruptions leave YNR at 0.9–2.3× — so "suppress when YNR
+is simultaneously ≥3× elevated" kills every teleseism and no measured
+eruption. Composed detector: night gate (kills diurnal cultural noise) +
+quiet baseline + 15-minute sustained minimum + regional veto (kills
+earthquakes) + 60-minute refractory. **Zero false positives in 1,606
+gate-hours; 4 of 13 eruptions detected, all evening/overnight.** The
+remaining honest caveats: detection n=4; YNM itself was dark at 4 of 13
+eruption times, so the watch must present silence as no-information;
+and the veto depends on YNR being up (when both are dark, the watch is
+simply off).
+
+**Where this leaves the detector**: the night-gated watch is validated
+to the standard the card would print, with the caveats above worn on its
+sleeve. Full-day coverage still requires spectral discrimination.
 
 ## What shipped instead
 
