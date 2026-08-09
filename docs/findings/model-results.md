@@ -21,6 +21,7 @@ Regenerate with `uv run geyser-ai backtest`; the full table lives in
 | Beehive | `rolling_normal` | 119.8 | 166.1 | 52% | 87% |
 | Fountain | `adaptive_lognormal` | 35.2 | 48.4 | 52% | 87% |
 | Lion | `series_conditional` | 119.4 | 187.6 | 61% | 89% |
+| Artemisia | `best_parametric` | 174.9 | 240.3 | 53% | 86% |
 
 ## The single most important result
 
@@ -108,6 +109,27 @@ consequence of the second-mode band recognising series gaps as real — and
 the honest 90% band catches 85.5%. The honest 50% is a poor 30.5%: with a
 bimodal spread the central band often straddles the empty valley, which is
 a structural cost of the shape, not a fixable calibration error.
+
+## Artemisia, the tenth geyser (added 2026-08-09)
+
+The last candidate standing from the sweep, re-ranked through the production
+intervals table rather than the crude two-year gap analysis — a re-ranking
+that mattered: Till's promising crude log-sd of 0.197 dissolved into **2.16
+at a 12-minute median** under the real filter (the crude mode-finder had
+locked onto a harmonic), Lone Star came out at 1.51, Aurum at 0.68. Artemisia
+held: **log-sd 0.208 on a ~22 h median** (2,069 valid intervals since 2015),
+cleanly unimodal in log space, and **30% logger-recorded**, which keeps its
+valid share at 0.8–0.95 around the clock — observationally better than
+Fountain despite one eruption a day.
+
+Walk-forward (386 evaluations): `best_parametric` wins outright at CRPS
+174.9, with the next four models within 3.4%. It *is* the default, so
+Artemisia takes no `BEST_MODEL_BY_GEYSER` entry — nothing to pin. Calibration
+53%/86%. Honest coverage: 29.6% of raw gaps rejected, honest 90% band 60.8%
+— mid-pack, far better than Fountain's 47.8%, thanks to the logger.
+
+Neither the NPS nor Geysers.net predicts it. One eruption a day means the
+scoreboard will accumulate slowly; patience before judging its live numbers.
 
 ## What production serves, and why
 

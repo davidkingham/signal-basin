@@ -66,6 +66,7 @@ GEYSER_SPECS = {
     "Great Fountain": (690.0, 0.14),
     "Beehive": (1100.0, 0.22),
     "Fountain": (305.0, 0.21),
+    "Artemisia": (1320.0, 0.21),
 }
 
 # Anchored just before "now" so the recent-eruptions endpoint and data-age

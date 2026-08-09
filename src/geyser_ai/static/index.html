@@ -466,7 +466,7 @@ const HOURS = 12;            // future span of the shared axis
 const PAST_H = 1;            // shown before "now", so the marker sits inside
 const SPAN = PAST_H + HOURS; // total hours across the ribbon
 const REFRESH_MS = 5 * 60 * 1000;
-const TARGETS = new Set(["Old Faithful","Grand","Daisy","Riverside","Castle","Great Fountain","Beehive","Fountain","Lion"]);
+const TARGETS = new Set(["Old Faithful","Grand","Daisy","Riverside","Castle","Great Fountain","Beehive","Fountain","Lion","Artemisia"]);
 
 let lastData = null;
 
@@ -731,8 +731,14 @@ function card(p){
       <h3 class="name">${p.geyser}</h3>
       <div class="until">${humanMins(p.minutes_until)}</div>
     </div>
-    ${overdue ? `<div class="overdue-note">Overdue — expected any minute (${
-        Math.round(p.current_cycle_prob*100)}% this cycle)</div>` : ""}
+    ${overdue ? `<div class="overdue-note">${
+        // "Any minute" is only honest when the forecast means it: a watched
+        // Daisy a few minutes past its median, not a Lion series gap whose
+        // remaining spread is measured in hours.
+        p.minutes_until != null && p.minutes_until < 30
+          ? `Overdue — expected any minute (${Math.round(p.current_cycle_prob*100)}% this cycle)`
+          : `Running late — ${Math.round(p.current_cycle_prob*100)}% still this cycle`
+      }</div>` : ""}
     ${live ? `<div class="live-note">Indicator running${
         p.regime_detail && p.regime_detail.indicator_elapsed_min != null
           ? ` — started ${Math.round(p.regime_detail.indicator_elapsed_min)} min ago` : ""

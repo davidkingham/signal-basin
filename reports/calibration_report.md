@@ -75,6 +75,12 @@ At every evaluated eruption each model sees **only** intervals strictly earlier 
 | Lion | lognormal | 2,000 | 141.2 | 204.5 | 32.6% ⚠ | 93.8% |
 | Lion | adaptive_lognormal | 2,000 | 141.4 | 204.5 | 31.6% ⚠ | 93.7% |
 | Lion | rolling_normal | 2,000 | 149.4 | 230.0 | 33.2% ⚠ | 90.8% |
+| Artemisia | **best_parametric** | 386 | 174.9 | 240.3 | 53.1% | 86.0% |
+| Artemisia | adaptive_lognormal | 386 | 175.8 | 241.3 | 52.6% | 87.3% |
+| Artemisia | lognormal | 386 | 176.1 | 242.5 | 52.3% | 86.3% |
+| Artemisia | weibull | 386 | 178.0 | 244.4 | 57.8% · | 90.4% |
+| Artemisia | rolling_normal | 386 | 180.8 | 250.8 | 53.6% | 87.0% |
+| Artemisia | weibull_aft | 386 | 197.8 | 265.0 | 55.7% · | 86.5% |
 
 **Bold** = best CRPS for that geyser.
 
@@ -91,13 +97,14 @@ At every evaluated eruption each model sees **only** intervals strictly earlier 
 | Beehive | rolling_normal | 119.8 | 119.8 | 0.0% |
 | Fountain | adaptive_lognormal | 35.2 | 35.7 | 1.3% |
 | Lion | series_conditional | 119.4 | 149.4 | 20.0% |
+| Artemisia | best_parametric | 174.9 | 180.8 | 3.3% |
 
 ## Known gaps
 
 - **Castle** — the best model (`minor_conditional`) is far too wide: its nominal 50% interval actually covers 61%. The predicted distribution is the wrong *shape*, not just the wrong width.
 - **Lion** — the best model (`series_conditional`) is far too wide: its nominal 50% interval actually covers 61%. The predicted distribution is the wrong *shape*, not just the wrong width.
 
-- **The covariate model did not earn its complexity.** `weibull_aft` (lifelines Weibull AFT with previous-interval, clock-time, seasonal and entry-flag covariates) ranks in the bottom half on 8 of 9 geysers: Old Faithful 5/8, Grand 7/7, Daisy 7/7, Riverside 6/6, Castle 5/8, Great Fountain 7/7, Beehive 6/6, Fountain 6/6, Lion 2/7. The simple rolling lognormal/Weibull fits beat it nearly everywhere, and the dashboard-style baseline is competitive. Reported as-is.
+- **The covariate model did not earn its complexity.** `weibull_aft` (lifelines Weibull AFT with previous-interval, clock-time, seasonal and entry-flag covariates) ranks in the bottom half on 9 of 10 geysers: Old Faithful 5/8, Grand 7/7, Daisy 7/7, Riverside 6/6, Castle 5/8, Great Fountain 7/7, Beehive 6/6, Fountain 6/6, Lion 2/7, Artemisia 6/6. The simple rolling lognormal/Weibull fits beat it nearly everywhere, and the dashboard-style baseline is competitive. Reported as-is.
 
 
 ### Honest coverage: scoring the intervals the filter throws away
@@ -116,6 +123,7 @@ Everything above is measured only on intervals that passed the validity filter, 
 | Beehive | 1,279 | 8.2% | 47.2% | 80.4% | 87.6% |
 | Fountain | 1,307 | 45.9% | 27.5% | 47.8% | 88.4% |
 | Lion | 1,500 | 11.1% | 30.5% | 85.5% | 93.8% |
+| Artemisia | 548 | 29.6% | 36.9% | 60.8% | 86.3% |
 
 The drop between the last two columns is the real-world penalty. Treat the headline table as an upper bound on field reliability, and see the renewal/missed-eruption handling in `predict` (README) for how the CLI compensates at prediction time.
 
@@ -130,13 +138,13 @@ Each decision time is scored **twice, identically**, with neighbour conditioning
 
 | Geyser | Regime | n | CRPS off | CRPS on | Δ | 90% off | 90% on |
 |---|---|---:|---:|---:|---:|---:|---:|
-| Grand | **overall** | 21,406 | 44.4 | 44.5 | +0.1% | 90% | 90% |
-| Grand | base | 18,031 | 43.8 | 43.8 | +0.0% | 90% | 90% |
-| Grand | precursor_shifted | 1,688 | 53.7 | 54.4 | +1.3% | 88% | 86% |
-| Grand | turban_gated | 1,687 | 41.9 | 42.0 | +0.3% | 91% | 91% |
-| Beehive | **overall** | 30,701 | 118.2 | 114.8 | -2.8% | 86% | 90% |
-| Beehive | base | 28,645 | 116.1 | 116.1 | -0.0% | 90% | 90% |
-| Beehive | indicator_active | 2,056 | 147.3 | 97.3 | -33.9% | 30% | 88% |
+| Grand | **overall** | 21,406 | 44.4 | 44.4 | +0.2% | 90% | 90% |
+| Grand | base | 18,019 | 43.7 | 43.7 | +0.0% | 90% | 90% |
+| Grand | precursor_shifted | 1,687 | 53.5 | 54.3 | +1.6% | 87% | 86% |
+| Grand | turban_gated | 1,700 | 42.3 | 42.3 | +0.2% | 93% | 92% |
+| Beehive | **overall** | 30,699 | 118.2 | 114.8 | -2.9% | 86% | 89% |
+| Beehive | base | 28,656 | 116.2 | 116.2 | -0.0% | 90% | 90% |
+| Beehive | indicator_active | 2,043 | 147.1 | 95.0 | -35.4% | 29% | 87% |
 
 **Beehive's Indicator works.** In the minutes it is running, CRPS falls by about a third and nominal 90% coverage goes from badly overconfident to roughly honest. The no-Indicator regime is untouched, which is the point — the conditioning adds information only when there is information to add. Residual error in that regime is dominated by cycles where the Beehive eruption itself was never logged (~6% of Indicator entries), not by the model.
 
@@ -162,6 +170,7 @@ Observation-entry mix since 2015 (% of valid intervals):
 
 | Geyser | webcam | electronic | approximate | in-eruption |
 |---|---:|---:|---:|---:|
+| Artemisia | 15.4% | 35.6% | 9.1% | 21.7% |
 | Beehive | 48.2% | 1.2% | 1.5% | 2.7% |
 | Castle | 48.7% | 20.2% | 1.1% | 11.2% |
 | Daisy | 58.2% | 24.2% | 0.6% | 6.9% |
