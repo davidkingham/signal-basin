@@ -111,9 +111,7 @@ class TestPlanningCardsSortLast:
         payload = svc.get_predictions(do_sync=False, density_points=16, record=False)
         rank = {"planning": 1, "context": 2}
         ranks = [
-            rank.get(p.get("display_mode"), 0)
-            for p in payload["predictions"]
-            if "error" not in p
+            rank.get(p.get("display_mode"), 0) for p in payload["predictions"] if "error" not in p
         ]
         # live < planning < context; no card may sort above its class.
         assert ranks == sorted(ranks), f"cards out of class order: {ranks}"

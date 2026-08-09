@@ -49,9 +49,7 @@ class TestPredictions:
     def test_all_geysers_present_and_sorted(self):
         d = client.get("/api/predictions?hours=12&points=16").json()
         preds = [
-            p
-            for p in d["predictions"]
-            if "error" not in p and p.get("display_mode") != "context"
+            p for p in d["predictions"] if "error" not in p and p.get("display_mode") != "context"
         ]
         assert len(preds) == len(TARGET_GEYSERS)
         # Soonest-first among live predictions; planning-mode cards name no
