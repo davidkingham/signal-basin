@@ -715,8 +715,13 @@ function whyPanel(p){
 
 /* ── cards ──────────────────────────────────────────────── */
 function card(p){
+  // The server's minutes_until is frozen at payload-generation time and then
+  // ages in the response cache; the absolute predicted_utc does not. Compute
+  // the countdown here, from the viewer's clock, so "in 40 min" and the
+  // "most likely" time can never disagree.
+  const minsUntil = p.predicted_utc ? (new Date(p.predicted_utc) - Date.now()) / 60000 : null;
   const el = document.createElement("article");
-  el.className = "card" + (p.minutes_until != null && p.minutes_until < 45 ? " soon" : "");
+  el.className = "card" + (minsUntil != null && minsUntil < 45 ? " soon" : "");
 
   if (p.error){
     el.innerHTML = `<div class="row1"><h3 class="name">${p.geyser}</h3></div>
@@ -776,7 +781,7 @@ function card(p){
     return el;
   }
 
-  const beyond = p.minutes_until > HOURS*60;
+  const beyond = minsUntil > HOURS*60;
   const live = p.regime && p.regime !== "base";
   if (live) el.classList.add("live");
   // Past the median but the current cycle is still the likely story. Say so
@@ -786,13 +791,13 @@ function card(p){
   el.innerHTML = `
     <div class="row1">
       <h3 class="name">${p.geyser}</h3>
-      <div class="until">${humanMins(p.minutes_until)}</div>
+      <div class="until">${humanMins(minsUntil)}</div>
     </div>
     ${overdue ? `<div class="overdue-note">${
         // "Any minute" is only honest when the forecast means it: a watched
         // Daisy a few minutes past its median, not a Lion series gap whose
         // remaining spread is measured in hours.
-        p.minutes_until != null && p.minutes_until < 30
+        minsUntil != null && minsUntil < 30
           ? `Overdue — expected any minute (${Math.round(p.current_cycle_prob*100)}% this cycle)`
           : `Running late — ${Math.round(p.current_cycle_prob*100)}% still this cycle`
       }</div>` : ""}
@@ -845,6 +850,22 @@ function renderFeed(data){
     </div>`).join("");
 }
 
+function renderCards(pr){
+  const cards = document.getElementById("cards");
+  // The re-render replaces every card; an open "why this time?" panel must
+  // survive it or reading gets interrupted mid-sentence.
+  const openWhy = new Set(
+    [...cards.querySelectorAll("details.why[open]")].map(d => d.closest("article")?.dataset.geyser)
+  );
+  cards.innerHTML = "";
+  pr.predictions.forEach(p => {
+    const el = card(p);
+    el.dataset.geyser = p.geyser;
+    if (openWhy.has(p.geyser)) el.querySelector("details.why")?.setAttribute("open", "");
+    cards.appendChild(el);
+  });
+}
+
 /* ── load ───────────────────────────────────────────────── */
 async function load(){
   try{
@@ -854,24 +875,14 @@ async function load(){
     ]);
     lastData = pr;
     renderAxis();
-
-    const cards = document.getElementById("cards");
-    // The auto-refresh replaces every card; an open "why this time?" panel
-    // must survive it or reading gets interrupted mid-sentence.
-    const openWhy = new Set(
-      [...cards.querySelectorAll("details.why[open]")].map(d => d.closest("article")?.dataset.geyser)
-    );
-    cards.innerHTML = "";
-    pr.predictions.forEach(p => {
-      const el = card(p);
-      el.dataset.geyser = p.geyser;
-      if (openWhy.has(p.geyser)) el.querySelector("details.why")?.setAttribute("open", "");
-      cards.appendChild(el);
-    });
+    renderCards(pr);
     renderFeed(ev);
 
     const n = pr.predictions.filter(p => !p.error).length;
-    const freshest = Math.min(...pr.predictions.filter(p => !p.error).map(p => p.data_age_hours));
+    // The Steamboat context entry carries no data_age_hours; one undefined in
+    // Math.min turns the whole status line into "NaNd ago".
+    const ages = pr.predictions.map(p => p.data_age_hours).filter(Number.isFinite);
+    const freshest = ages.length ? Math.min(...ages) : Infinity;
     const dot = document.getElementById("status-dot");
     dot.className = "dot" + (freshest < 2 ? "" : freshest < 8 ? " warn" : " bad");
     document.getElementById("status").textContent =
@@ -1449,6 +1460,7 @@ function refresh(){ load(); loadScored(); }
 parkClock();
 setInterval(parkClock, 1000);
 setInterval(renderAxis, 60000);
+setInterval(() => { if (lastData) renderCards(lastData); }, 60000);
 refresh();
 setInterval(refresh, REFRESH_MS);
 </script>
