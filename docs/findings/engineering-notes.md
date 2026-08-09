@@ -188,3 +188,26 @@ Memory and disk are billed on **provisioned** resources for as long as the
 container is running; CPU is billed on **active use**. So keeping it awake is
 mostly a memory bill, and halving the cron interval would roughly double only the
 CPU line.
+
+
+## A dead container does not restart itself — it errors until started
+
+Observed live 2026-08-09: `/api/health` returning raw
+`Error proxying request to container: The container is not running, consider
+calling start()` while the cached endpoints served 200s — the response cache
+papered over a dead container until staleness would have taken the whole
+dashboard down. When the container instance dies (crash, OOM, host
+maintenance), the containers library marks it stopped and every subsequent
+`containerFetch` throws that error; nothing restarts it. The cron's
+`stub.fetch` hits the same exception, so the five-minute tick that normally
+keeps everything warm just logs failures forever.
+
+The fix is in the Durable Object: catch exactly that error in `fetch()`,
+call `start()`, rerun the warm-up probe, and retry once. With the cron
+driving traffic, any future crash heals within one tick. Until that patch,
+the remedy was a manual `wrangler deploy`, which rolls the container as a
+side effect — worth knowing if the self-heal ever regresses.
+
+Diagnostic tell: uncached endpoints 500 with the raw proxy error while
+cached ones serve `x-geyser-cache: hit/stale` 200s. If you see that split,
+the container is down and the cache is lying about it.

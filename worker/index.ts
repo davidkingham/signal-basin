@@ -167,6 +167,31 @@ export class GeyserContainer extends Container<Env> {
   }
 
   /**
+   * Self-heal a dead container instead of erroring until a human redeploys.
+   *
+   * When the container instance dies (crash, OOM, host maintenance), the
+   * containers library marks it stopped and every subsequent containerFetch
+   * throws "The container is not running, consider calling start()" -- it
+   * does NOT restart on its own, and the DO surfaces raw 500s while the
+   * response cache quietly papers over the outage until it goes stale.
+   * Observed live on 2026-08-09; the remedy had been a manual redeploy.
+   * Instead: catch exactly that state, start the container, and retry once.
+   * With the five-minute cron driving traffic, any crash now heals within
+   * one tick.
+   */
+  override async fetch(request: Request): Promise<Response> {
+    try {
+      return await super.fetch(request);
+    } catch (err) {
+      if (!String(err).includes("not running")) throw err;
+      console.warn(JSON.stringify({ event: "container_dead_restarting", error: String(err) }));
+      await this.start();
+      await this.onStart();
+      return await super.fetch(request);
+    }
+  }
+
+  /**
    * Cache read, plus a note that somebody wants this endpoint. Deliberately
    * does not touch the container, so serving from cache never wakes it.
    */
