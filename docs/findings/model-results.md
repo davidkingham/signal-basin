@@ -69,9 +69,23 @@ entries reach GeyserTimes within 30 minutes and the median entry latency is
 eruption has usually already happened. Sampled at random moments, the newest
 logged eruption is a median of **206 hours old**, and an anchor fresh enough
 to predict from exists ~2% of the time. A live card would read "no report
-for 9 days" essentially always. The useful product for Lone Star is a
-*planning* answer (interval stats + "log it when you arrive"), not a
-countdown — unbuilt as of this writing.
+for 9 days" essentially always.
+
+**"But a late report still carries the correct eruption time"** — it does,
+and it does not save the countdown, because Lone Star's phase memory is
+shorter than its reporting latency. Measured against a pure phase
+extrapolation (`anchor + k × 164 min`), the 90% band is ±45 min one
+interval out, ±69 at two (knowing nothing is ±82), and indistinguishable
+from no information at three — the ~28-minute per-cycle jitter (17% of the
+cycle) compounds as a random walk. Same physics as the Turban→Grand
+lattice: phase decoheres within a couple of cycles. With median entry
+latency of 2.7 h eating the one useful cycle, a phase-bearing anchor exists
+**7% of summer-daytime moments**. The useful product is therefore a
+*planning* answer — interval stats, worst-case wait, and the decision rule
+"a trailside-logbook time from the last ~3 h puts the next eruption at
++164 min ± 45; older times carry nothing" — not a countdown. Unbuilt as of
+this writing. If Lone Star ever gets an electronic logger, latency goes to
+zero and it graduates to a live card overnight.
 
 ## Lion, the ninth geyser (added 2026-08-09)
 
