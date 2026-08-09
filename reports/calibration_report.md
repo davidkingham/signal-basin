@@ -68,6 +68,13 @@ At every evaluated eruption each model sees **only** intervals strictly earlier 
 | Fountain | best_parametric | 707 | 37.3 | 52.1 | 51.1% | 88.0% |
 | Fountain | weibull | 707 | 37.8 | 52.4 | 59.8% · | 91.2% |
 | Fountain | weibull_aft | 707 | 38.4 | 52.1 | 61.0% ⚠ | 89.1% |
+| Lion | **series_conditional** | 2,000 | 119.4 | 187.6 | 61.0% ⚠ | 89.1% |
+| Lion | weibull_aft | 2,000 | 134.2 | 196.1 | 45.6% | 90.8% |
+| Lion | weibull | 2,000 | 140.4 | 210.9 | 36.7% ⚠ | 94.1% |
+| Lion | best_parametric | 2,000 | 141.1 | 204.4 | 33.6% ⚠ | 93.5% |
+| Lion | lognormal | 2,000 | 141.2 | 204.5 | 32.6% ⚠ | 93.8% |
+| Lion | adaptive_lognormal | 2,000 | 141.4 | 204.5 | 31.6% ⚠ | 93.7% |
+| Lion | rolling_normal | 2,000 | 149.4 | 230.0 | 33.2% ⚠ | 90.8% |
 
 **Bold** = best CRPS for that geyser.
 
@@ -83,12 +90,14 @@ At every evaluated eruption each model sees **only** intervals strictly earlier 
 | Great Fountain | lognormal | 45.6 | 46.4 | 1.8% |
 | Beehive | rolling_normal | 119.8 | 119.8 | 0.0% |
 | Fountain | adaptive_lognormal | 35.2 | 35.7 | 1.3% |
+| Lion | series_conditional | 119.4 | 149.4 | 20.0% |
 
 ## Known gaps
 
 - **Castle** — the best model (`minor_conditional`) is far too wide: its nominal 50% interval actually covers 61%. The predicted distribution is the wrong *shape*, not just the wrong width.
+- **Lion** — the best model (`series_conditional`) is far too wide: its nominal 50% interval actually covers 61%. The predicted distribution is the wrong *shape*, not just the wrong width.
 
-- **The covariate model did not earn its complexity.** `weibull_aft` (lifelines Weibull AFT with previous-interval, clock-time, seasonal and entry-flag covariates) ranks in the bottom half on 8 of 8 geysers: Old Faithful 5/8, Grand 7/7, Daisy 7/7, Riverside 6/6, Castle 5/8, Great Fountain 7/7, Beehive 6/6, Fountain 6/6. The simple rolling lognormal/Weibull fits beat it nearly everywhere, and the dashboard-style baseline is competitive. Reported as-is.
+- **The covariate model did not earn its complexity.** `weibull_aft` (lifelines Weibull AFT with previous-interval, clock-time, seasonal and entry-flag covariates) ranks in the bottom half on 8 of 9 geysers: Old Faithful 5/8, Grand 7/7, Daisy 7/7, Riverside 6/6, Castle 5/8, Great Fountain 7/7, Beehive 6/6, Fountain 6/6, Lion 2/7. The simple rolling lognormal/Weibull fits beat it nearly everywhere, and the dashboard-style baseline is competitive. Reported as-is.
 
 
 ### Honest coverage: scoring the intervals the filter throws away
@@ -106,6 +115,7 @@ Everything above is measured only on intervals that passed the validity filter, 
 | Great Fountain | 719 | 43.3% | 31.3% | 51.7% | 91.2% |
 | Beehive | 1,279 | 8.2% | 47.2% | 80.4% | 87.6% |
 | Fountain | 1,307 | 45.9% | 27.5% | 47.8% | 88.4% |
+| Lion | 1,500 | 11.1% | 30.5% | 85.5% | 93.8% |
 
 The drop between the last two columns is the real-world penalty. Treat the headline table as an upper bound on field reliability, and see the renewal/missed-eruption handling in `predict` (README) for how the CLI compensates at prediction time.
 
@@ -120,13 +130,13 @@ Each decision time is scored **twice, identically**, with neighbour conditioning
 
 | Geyser | Regime | n | CRPS off | CRPS on | Δ | 90% off | 90% on |
 |---|---|---:|---:|---:|---:|---:|---:|
-| Grand | **overall** | 21,410 | 44.4 | 44.5 | +0.2% | 90% | 90% |
-| Grand | base | 18,008 | 43.7 | 43.7 | +0.0% | 90% | 90% |
-| Grand | precursor_shifted | 1,686 | 53.5 | 54.3 | +1.5% | 87% | 86% |
-| Grand | turban_gated | 1,716 | 42.3 | 42.4 | +0.2% | 93% | 92% |
-| Beehive | **overall** | 30,708 | 118.2 | 114.9 | -2.8% | 86% | 89% |
-| Beehive | base | 28,667 | 116.2 | 116.1 | -0.0% | 90% | 90% |
-| Beehive | indicator_active | 2,041 | 147.1 | 97.6 | -33.7% | 30% | 87% |
+| Grand | **overall** | 21,406 | 44.4 | 44.5 | +0.1% | 90% | 90% |
+| Grand | base | 18,031 | 43.8 | 43.8 | +0.0% | 90% | 90% |
+| Grand | precursor_shifted | 1,688 | 53.7 | 54.4 | +1.3% | 88% | 86% |
+| Grand | turban_gated | 1,687 | 41.9 | 42.0 | +0.3% | 91% | 91% |
+| Beehive | **overall** | 30,701 | 118.2 | 114.8 | -2.8% | 86% | 90% |
+| Beehive | base | 28,645 | 116.1 | 116.1 | -0.0% | 90% | 90% |
+| Beehive | indicator_active | 2,056 | 147.3 | 97.3 | -33.9% | 30% | 88% |
 
 **Beehive's Indicator works.** In the minutes it is running, CRPS falls by about a third and nominal 90% coverage goes from badly overconfident to roughly honest. The no-Indicator regime is untouched, which is the point — the conditioning adds information only when there is information to add. Residual error in that regime is dominated by cycles where the Beehive eruption itself was never logged (~6% of Indicator entries), not by the model.
 
@@ -144,7 +154,7 @@ Each decision time is scored **twice, identically**, with neighbour conditioning
 
 ## Data-quality notes
 
-- Of 1,340,410 consecutive-eruption gaps, 1,008,658 (75.2%) pass the per-geyser plausibility filter (0.35x-3x that geyser's median). The rest are overwhelmingly observation gaps — nobody is watching Riverside at 3am in February — not real eruptions.
+- Of 1,340,410 consecutive-eruption gaps, 1,077,983 (80.4%) pass the per-geyser plausibility filter (0.35x-3x that geyser's median). The rest are overwhelmingly observation gaps — nobody is watching Riverside at 3am in February — not real eruptions.
 
 - The ceiling is **1.75x** the median rather than the more obvious 3x because the interval histograms show clear **harmonics**: Riverside clusters at ~390, ~780 and ~1150 minutes, Great Fountain at ~686 and ~1400. Those secondary peaks sit at exactly 2x and 3x the median and are one and two missed eruptions. A 3x ceiling admits them, and models trained on the contaminated series predict distributions far wider than reality — it was worth several times more CRPS than any modeling choice in this report.
 
@@ -155,9 +165,10 @@ Observation-entry mix since 2015 (% of valid intervals):
 | Beehive | 48.2% | 1.2% | 1.5% | 2.7% |
 | Castle | 48.7% | 20.2% | 1.1% | 11.2% |
 | Daisy | 58.2% | 24.2% | 0.6% | 6.9% |
-| Fountain | 0.0% | 57.1% | 0.7% | 5.2% |
+| Fountain | 0.0% | 56.2% | 0.8% | 5.7% |
 | Grand | 45.8% | 15.5% | 1.2% | 5.2% |
 | Great Fountain | 0.0% | 62.5% | 0.8% | 2.6% |
+| Lion | 69.9% | 4.4% | 0.2% | 9.4% |
 | Old Faithful | 91.1% | 3.8% | 0.3% | 3.4% |
 | Riverside | 62.0% | 1.1% | 1.2% | 21.9% |
 

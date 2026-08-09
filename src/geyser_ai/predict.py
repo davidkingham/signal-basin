@@ -10,6 +10,8 @@ from .backtest import load_intervals
 from .config import DB_PATH, TARGET_GEYSERS
 from .models import (
     MINOR_MODE_GEYSERS,
+    SERIES_GEYSERS,
+    SeriesConditionalModel,
     default_model_name,
     default_models,
     fit_tail_mixture,
@@ -35,7 +37,7 @@ def _anchor(geyser: str, db_path=DB_PATH) -> pd.Series | None:
             """
             UNION ALL
             SELECT eruption_id, geyser, epoch, ts_utc, duration_seconds,
-                   webcam, electronic, approximate, in_eruption, minor, major
+                   webcam, electronic, approximate, in_eruption, minor, major, initial
             FROM recent_eruptions WHERE geyser = ?
             """
             if has_recent
@@ -46,7 +48,7 @@ def _anchor(geyser: str, db_path=DB_PATH) -> pd.Series | None:
             f"""
             WITH combined AS (
                 SELECT eruption_id, geyser, epoch, ts_utc, duration_seconds,
-                       webcam, electronic, approximate, in_eruption, minor, major
+                       webcam, electronic, approximate, in_eruption, minor, major, initial
                 FROM eruptions WHERE geyser = ?
                 {recent_sql}
             ),
@@ -106,6 +108,7 @@ def predict_geyser(
             "prev_duration_seconds": last.get("duration_seconds"),
             "prev_minor": bool(last.get("minor", False)),
             "prev_major": bool(last.get("major", False)),
+            "prev_initial": bool(last.get("initial", False)),
             # anchor covariates come from the last observed eruption
             "prev_hour_local": int(pd.to_datetime(last["ts_local"]).hour),
             "prev_doy": int(pd.to_datetime(last["ts_local"]).dayofyear),
@@ -168,7 +171,13 @@ def predict_geyser(
     # models' branch selection: Old Faithful served a constant ~93 min against
     # a bimodal 70/102 reality. See docs/findings/live-scoreboard.md.
     intervals = hist["interval_min"].to_numpy()
-    marginal = fit_tail_mixture(intervals)
+    # A series geyser's pooled interval distribution is bimodal, and a plain
+    # lognormal fitted to it puts its median in the empty valley between the
+    # modes. Chained missed-eruption draws must step through the real pooled
+    # mixture instead.
+    marginal = (
+        SeriesConditionalModel().fit_marginal(hist) if geyser in SERIES_GEYSERS else None
+    ) or fit_tail_mixture(intervals)
     base_dist = fit_tail_mixture(intervals, narrow=pred.dist) or pred.dist
     # Past the first simulated eruption the branch is unknown again, so chained
     # missed-eruption draws revert to the marginal.
@@ -215,6 +224,16 @@ def predict_geyser(
         explain["branch"] = {
             "condition": "after a minor" if was_minor else "after a full eruption",
             "n_branch": int((recent_flags == was_minor).sum()),
+            "n_window": int(len(recent_flags)),
+        }
+    elif geyser in SERIES_GEYSERS and "prev_initial" in hist.columns:
+        recent_flags = hist.tail(600)["prev_initial"].astype(bool)
+        was_initial = bool(row["prev_initial"])
+        explain["branch"] = {
+            "condition": (
+                "after a series initial" if was_initial else "after a mid-series eruption"
+            ),
+            "n_branch": int((recent_flags == was_initial).sum()),
             "n_window": int(len(recent_flags)),
         }
 

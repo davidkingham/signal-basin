@@ -45,6 +45,14 @@ from .config import (
 # turned out to matter far more than the multipliers themselves.
 INTERVAL_MIN_MULT = 0.5
 INTERVAL_MAX_MULT = 1.75
+# A geyser may have a genuine SECOND interval mode (Lion: ~80 min in-series vs
+# ~10 h between series). The second-mode band only engages when the local long
+# mode sits at least this factor above the short one. 3.5 is chosen so that
+# harmonics can never qualify: a missed eruption puts a phantom mode at exactly
+# 2x (or 3x) the true interval, and both stay below the ratio. Lion's real
+# ratio is ~7. Without this, the filter deleted ALL 7,410 of Lion's series
+# gaps since 2015 -- the mirror image of the Castle post-minor deletion.
+SECOND_MODE_RATIO = 3.5
 # Rows a regime needs before it gets its own validity baseline. Below this the
 # geyser almost certainly has no real minor mode, just a few stray flags.
 MIN_REGIME_ROWS = 200
@@ -321,7 +329,13 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
                 -- the interval that FOLLOWS a minor is physically different.
                 -- This is a real state variable, not an entry artifact.
                 LAG(minor)            OVER w AS prev_minor,
-                LAG(major)            OVER w AS prev_major
+                LAG(major)            OVER w AS prev_major,
+                -- Lion erupts in SERIES: an initial, then a few more at ~80
+                -- minute spacing, then hours of quiet. Whether the anchor was
+                -- the series initial is a real state variable in the same way
+                -- prev_minor is, and observers record it at logging time.
+                initial,
+                LAG(initial)          OVER w AS prev_initial
             FROM singles
             WINDOW w AS (PARTITION BY geyser ORDER BY epoch)
         ),
@@ -395,7 +409,16 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
                    quantile_cont(interval_min, 0.25) OVER (
                        PARTITION BY geyser, regime_minor ORDER BY epoch
                        ROWS BETWEEN 400 PRECEDING AND 400 FOLLOWING
-                   ) AS base0_regime
+                   ) AS base0_regime,
+                   -- Anchor for a possible SECOND (long) mode: the local 75th
+                   -- percentile. For a unimodal geyser this sits within ~1.5x
+                   -- of the p25 anchor and the ratio guard below keeps the
+                   -- second band inert; for a series geyser like Lion it sits
+                   -- in the between-series mode.
+                   quantile_cont(interval_min, 0.75) OVER (
+                       PARTITION BY geyser ORDER BY epoch
+                       ROWS BETWEEN 400 PRECEDING AND 400 FOLLOWING
+                   ) AS base_hi_pooled
             FROM regime_sized
         ),
         base_pick AS (
@@ -419,7 +442,15 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
                    ) OVER (
                        PARTITION BY geyser, regime_minor ORDER BY epoch
                        ROWS BETWEEN 300 PRECEDING AND 300 FOLLOWING
-                   ) AS med_regime
+                   ) AS med_regime,
+                   median(
+                       CASE WHEN interval_min BETWEEN 0.55 * base_hi_pooled
+                                              AND 1.4 * base_hi_pooled
+                            THEN interval_min END
+                   ) OVER (
+                       PARTITION BY geyser ORDER BY epoch
+                       ROWS BETWEEN 300 PRECEDING AND 300 FOLLOWING
+                   ) AS med_long
             FROM base_pick
         ),
         local_med AS (
@@ -435,13 +466,14 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
                                                         AS prev_interval_min,
             r.prev_duration_seconds,
             r.exact, r.approximate, r.webcam, r.in_eruption, r.electronic,
-            r.near_start, r.major, r.minor, r.duration_seconds,
+            r.near_start, r.major, r.minor, r.initial, r.duration_seconds,
             COALESCE(r.prev_webcam, false)      AS prev_webcam,
             COALESCE(r.prev_electronic, false)  AS prev_electronic,
             COALESCE(r.prev_approximate, false) AS prev_approximate,
             COALESCE(r.prev_in_eruption, false) AS prev_in_eruption,
             COALESCE(r.prev_minor, false)       AS prev_minor,
             COALESCE(r.prev_major, false)       AS prev_major,
+            COALESCE(r.prev_initial, false)     AS prev_initial,
             hour(r.ts_local)                            AS hour_local,
             month(r.ts_local)                           AS month_local,
             year(r.ts_local)                            AS year_local,
@@ -451,9 +483,18 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
             hour(timezone('America/Denver', r.prev_ts_utc))      AS prev_hour_local,
             dayofyear(timezone('America/Denver', r.prev_ts_utc)) AS prev_doy,
             r.med_interval,
-            (r.med_interval IS NOT NULL
-             AND r.interval_min >= {INTERVAL_MIN_MULT} * r.med_interval
-             AND r.interval_min <= {INTERVAL_MAX_MULT} * r.med_interval) AS is_valid
+            r.med_long,
+            ((r.med_interval IS NOT NULL
+              AND r.interval_min >= {INTERVAL_MIN_MULT} * r.med_interval
+              AND r.interval_min <= {INTERVAL_MAX_MULT} * r.med_interval)
+             -- Second-mode band: a gap near the LONG local mode of a genuinely
+             -- bimodal geyser is a real interval, not a missed eruption. The
+             -- ratio guard keeps this branch inert everywhere harmonics could
+             -- masquerade as a mode; see SECOND_MODE_RATIO.
+             OR (r.med_interval IS NOT NULL AND r.med_long IS NOT NULL
+                 AND r.med_long >= {SECOND_MODE_RATIO} * r.med_interval
+                 AND r.interval_min >= {INTERVAL_MIN_MULT} * r.med_long
+                 AND r.interval_min <= {INTERVAL_MAX_MULT} * r.med_long)) AS is_valid
         FROM local_med r
         ORDER BY r.geyser, r.epoch
         """

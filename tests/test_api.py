@@ -66,7 +66,12 @@ class TestPredictions:
             assert {"entry_type"} <= set(ex["anchor"])
             assert ex["anchor"]["entry_type"] in ("in-person", "webcam", "electronic logger")
             if "branch" in ex:
-                assert ex["branch"]["condition"] in ("after a minor", "after a full eruption")
+                assert ex["branch"]["condition"] in (
+                    "after a minor",
+                    "after a full eruption",
+                    "after a series initial",
+                    "after a mid-series eruption",
+                )
                 assert 0 < ex["branch"]["n_branch"] <= ex["branch"]["n_window"]
 
     def test_windows_nested_and_ordered(self):

@@ -17,7 +17,7 @@ at almost exactly 2× and 3× the median: Riverside clusters near 390, 780 and
 1150 minutes; Great Fountain near 686 and 1400. Those are not long intervals.
 They are one and two eruptions nobody logged.
 
-## The validity filter, and its four generations
+## The validity filter, and its five generations
 
 An interval is marked `is_valid` only if it is plausible for that geyser. The
 rule is simple; getting the *baseline* right took four attempts, and each attempt
@@ -117,6 +117,35 @@ honest 90% coverage **60.5% → 73.2%**.
 **Lesson, and the general form of it:** a validity threshold assumes
 unimodality. The `minor` flag tells you when that assumption is false. Before
 adding a geyser, check whether it has a documented second mode.
+
+### Generation 5 — a second mode the regime split cannot reach
+
+Lion (added 2026-08-09) broke generation 4's fix in a new way. Lion erupts in
+SERIES — ~83-minute intervals while a series runs, ~10 hours between series —
+so its distribution is bimodal like Castle's, but the regime flag that
+separates Castle's modes does not separate Lion's: the interval after a
+non-initial eruption is *itself* a 40/60 mixture of "series continues" and
+"series over". No `prev_*` partition makes either side unimodal.
+
+Measured before fixing: with the short mode holding 53% of gaps, the p25
+baseline anchors there and the filter deleted **all 7,410 series gaps since
+2015** — the Castle deletion, mirrored.
+
+The fix accepts a gap near **either** local mode: a second baseline at the
+local 75th percentile, refined the same way as the first, with its own
+`[0.5, 1.75]×` band. The dangerous part is that a phantom mode from missed
+eruptions sits at exactly 2× (or 3×) the true interval, so the second band
+only engages when the long mode is at least **3.5×** the short one
+(`SECOND_MODE_RATIO`). Lion's real ratio is ~7; Great Fountain's old
+contamination sat at 2.0 and stays rejected.
+
+Verified: Old Faithful, Grand, Riverside, Great Fountain and Beehive came
+through **bit-identical**. Lion's series gaps went 0 → 5,742 of 7,410 kept
+(the rejected tail is >26 h gaps that plausibly contain a missed series).
+Three geysers gained a few *historical* rows — Fountain +532 (3.1–3.6× the
+short mode, consistent with its documented Morning-active long regime),
+Daisy +116 and Castle +76 (pre-2000 only, 4.2–9.3×) — none in the 2020s, so
+no production training window changed for the existing eight.
 
 ### A trap when comparing filter generations
 

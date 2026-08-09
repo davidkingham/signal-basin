@@ -25,7 +25,7 @@ mcp = MCPServer(
     name="geyser-ai",
     version="0.1.0",
     instructions=(
-        "Probabilistic next-eruption predictions for seven Yellowstone geysers, built "
+        "Probabilistic next-eruption predictions for Yellowstone geysers, built "
         "on public GeyserTimes data. Predictions are full probability distributions: "
         "always report the 50%/90% windows alongside the point estimate, and mention "
         "expected_missed_eruptions when it is non-trivial, since a long silence usually "
@@ -34,14 +34,22 @@ mcp = MCPServer(
 )
 
 GeyserName = Literal[
-    "Old Faithful", "Grand", "Daisy", "Riverside", "Castle", "Great Fountain", "Beehive", "Fountain"
+    "Old Faithful",
+    "Grand",
+    "Daisy",
+    "Riverside",
+    "Castle",
+    "Great Fountain",
+    "Beehive",
+    "Fountain",
+    "Lion",
 ]
 
 
 @mcp.tool(name="get_predictions")
 def get_predictions_tool(
     geyser: Annotated[
-        GeyserName | None, Field(description="Limit to one geyser; omit for all seven.")
+        GeyserName | None, Field(description="Limit to one geyser; omit for all.")
     ] = None,
     include_density: Annotated[
         bool, Field(description="Include the probability density curve (verbose).")
@@ -63,9 +71,7 @@ def get_predictions_tool(
 def get_recent_eruptions_tool(
     hours: Annotated[int, Field(ge=1, le=168, description="Lookback window.")] = 24,
     geyser: Annotated[GeyserName | None, Field(description="Optional filter.")] = None,
-    targets_only: Annotated[
-        bool, Field(description="Restrict to the seven modelled geysers.")
-    ] = False,
+    targets_only: Annotated[bool, Field(description="Restrict to the modelled geysers.")] = False,
 ) -> dict[str, Any]:
     """Eruptions logged recently, newest first, from GeyserTimes data."""
     names = [geyser] if geyser else (list(TARGET_GEYSERS) if targets_only else None)
@@ -74,7 +80,7 @@ def get_recent_eruptions_tool(
 
 @mcp.tool(name="get_geyser_stats")
 def get_geyser_stats_tool(
-    geyser: Annotated[GeyserName | None, Field(description="Omit for all seven.")] = None,
+    geyser: Annotated[GeyserName | None, Field(description="Omit for all.")] = None,
 ) -> dict[str, Any]:
     """Interval statistics per geyser.
 
@@ -87,7 +93,7 @@ def get_geyser_stats_tool(
 @mcp.tool(name="get_scoreboard")
 def get_scoreboard_tool(
     days: Annotated[float, Field(ge=1, le=365, description="Rolling window.")] = 30.0,
-    geyser: Annotated[GeyserName | None, Field(description="Omit for all seven.")] = None,
+    geyser: Annotated[GeyserName | None, Field(description="Omit for all.")] = None,
 ) -> dict[str, Any]:
     """How this project, the NPS and Geysers.net have actually done, per geyser.
 

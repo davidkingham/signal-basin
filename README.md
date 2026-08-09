@@ -67,7 +67,7 @@ nobody is watching Riverside at 3 a.m. in February — so a raw gap between
 consecutive entries is often several eruption cycles rather than one. An
 interval is marked `is_valid` only when it falls within **0.5×–1.75× a local,
 regime-specific baseline** for that geyser. The upper bound drops missed
-eruptions, the lower bound drops duplicate entries. About 75% of intervals
+eruptions, the lower bound drops duplicate entries. About 80% of intervals
 survive, and the raw value is retained so the thresholds can be revisited. The
 four things that baseline has to survive are in
 [What actually moved the numbers](#what-actually-moved-the-numbers).
@@ -88,6 +88,7 @@ Community-flagged `questionable` entries are excluded from the `eruptions` view.
 | `duration_lognormal` | Old Faithful only: short/long preceding-duration split |
 | `minor_conditional` | Castle & Old Faithful: conditions on whether the previous eruption was a *minor* |
 | `entry_conditional` | Logger-heavy geysers: conditions on whether the anchor came from an electronic logger |
+| `series_conditional` | Lion: branch on the anchor's series-`initial` flag, each branch a two-mode mixture |
 | *nowcast + Indicator* | Beehive: switches to a ~12-minute countdown once Beehive's Indicator starts |
 
 **Backtest.** Walk-forward over the last 3 years. At each evaluated eruption a
@@ -116,17 +117,20 @@ is better):
 | Great Fountain | `lognormal` | 45.6 | 62.9 | 55% | 91% |
 | Beehive | `rolling_normal` | 119.8 | 166.1 | 52% | 87% |
 | Fountain | `adaptive_lognormal` | 35.2 | 48.4 | 52% | 87% |
+| Lion | `series_conditional` | 119.4 | 187.6 | 61% | 89% |
 
 **Each geyser is served by the model in that table**, not by a single global
 default — see `models.BEST_MODEL_BY_GEYSER`. That distinction is only load-bearing
-for the two geysers with a minor mode, where conditioning on it roughly halves
-CRPS (Old Faithful 8.8 → 4.5, Castle 172.5 → 77.2 against `best_parametric`).
-On the other five the winner beats `best_parametric` by 0.2–4.8%, which is inside
-the noise, so they keep the default rather than pinning a choice on a coin flip.
+for the three geysers whose process has real state: the two with a minor mode,
+where conditioning on it roughly halves CRPS (Old Faithful 8.9 → 4.7, Castle
+173.0 → 77.6 against `best_parametric`), and Lion, where the series model takes
+15% off. On the other six the winner beats `best_parametric` by 0.2–5.5%, which
+is inside the noise, so they keep the default rather than pinning a choice on a
+coin flip.
 
 ### What actually moved the numbers
 
-**Data cleaning beat modeling, repeatedly.** Four successive fixes to the interval
+**Data cleaning beat modeling, repeatedly.** Five successive fixes to the interval
 validity filter each produced larger gains than any model ever did.
 
 *1. Harmonics.* The first version used a 3x-median ceiling. Interval histograms
@@ -182,6 +186,13 @@ condition on the minor flag is finally being charged for it. That is also why th
 earlier claim here that Castle's minor gain was "in variance rather than
 location" was wrong — the flat location difference was an artifact of the filter,
 not the physics.
+
+*5. A second mode the regime split cannot reach.* Lion's series structure is
+bimodal in a way no `prev_*` partition makes unimodal — the filter deleted all
+7,410 of its series gaps. A ratio-guarded second acceptance band (engaging only
+when the local long mode is ≥3.5× the short one, so 2× and 3× harmonics can
+never qualify) restored 5,742 of them while leaving the unimodal geysers
+bit-identical.
 
 **The minor-eruption flag is the single best covariate found.** For Old Faithful the
 post-minor and post-major interval distributions are almost disjoint — median 70 min
@@ -330,7 +341,7 @@ single-page dashboard. Interactive API docs are at `/docs`.
 | Endpoint | What it returns |
 |---|---|
 | `GET /` | The dashboard |
-| `GET /api/predictions?hours=12&points=96` | All eight geysers, sorted soonest first: median, 50%/90% windows, expected missed eruptions, data age, and a probability-density curve for charting |
+| `GET /api/predictions?hours=12&points=96` | All nine geysers, sorted soonest first: median, 50%/90% windows, expected missed eruptions, data age, and a probability-density curve for charting |
 | `GET /api/predictions/{geyser}?points=240` | One geyser, denser curve |
 | `GET /api/eruptions/recent?hours=24` | Recently logged eruptions (`geyser=` and `targets_only=` filters) |
 | `GET /api/stats?geyser=Grand` | Interval statistics per geyser |

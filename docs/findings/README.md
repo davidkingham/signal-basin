@@ -31,7 +31,7 @@ any model change ever has, and the largest single improvement available at any
 point came from noticing the filter was *deleting* real data. The best covariate
 in the project — the `minor` flag — was already in the archive, recorded by
 volunteers. The most sophisticated model, a survival regression with covariates,
-finished in the bottom half on all eight geysers. Of the external forcings the
+finished in the bottom half on every unimodal geyser. Of the external forcings the
 literature proposes, exactly one is real and large enough to matter for
 prediction (wind on Daisy), and we have not implemented it yet.
 

@@ -20,6 +20,7 @@ Regenerate with `uv run geyser-ai backtest`; the full table lives in
 | Great Fountain | `lognormal` | 45.6 | 62.9 | 55% | 91% |
 | Beehive | `rolling_normal` | 119.8 | 166.1 | 52% | 87% |
 | Fountain | `adaptive_lognormal` | 35.2 | 48.4 | 52% | 87% |
+| Lion | `series_conditional` | 119.4 | 187.6 | 61% | 89% |
 
 ## The single most important result
 
@@ -53,21 +54,68 @@ Two caveats, recorded up front:
   scatter. Nobody should be surprised if a future Morning active phase makes
   Fountain's live numbers sag until that conditioning is added.
 
-The runner-up candidate from the same sweep was **Lion** (in-series log-sd
-0.133 at an 83-minute median, tighter than anything served except Daisy and
-Riverside) — but it needs a series-aware conditional model on the `initial`
-flag (after an initial, 82% of next eruptions arrive within 120 min; after a
-non-initial it is a 40/60 mixture of series-continue at ~80 min and series-end
-at 7.8–14.7 h). Not added yet. Ruled out with numbers: White Dome (0.297),
+The runner-up candidate from the same sweep, **Lion**, was added the next day
+with the series model it needed — see the section below. Ruled out with
+numbers: White Dome (0.297),
 Aurum (0.319), Sawmill (0.306), Grotto (0.298), Lone Star (regular but 176
 entries in two years — backcountry logging is too sparse to anchor on).
+
+## Lion, the ninth geyser (added 2026-08-09)
+
+The sweep's runner-up, and the reason it could not be a drop-in: Lion erupts
+in **series**. An initial eruption (observer-flagged `ini`, ~19% of entries),
+one to five more at ~83-minute spacing (in-series log-sd 0.133 — tighter than
+anything served except Daisy and Riverside), then 7.8–14.7 h of quiet. Two
+pieces of machinery had to exist first:
+
+1. **The validity filter deleted the entire long mode** — all 7,410 series
+   gaps since 2015 — because a p25-anchored baseline sits in the short mode
+   and no `prev_*` regime split fixes it (the post-non-initial branch is
+   itself a 40/60 mixture). Generation 5 of the filter accepts gaps near
+   either local mode, ratio-guarded so harmonics can never qualify; see
+   [data-quality.md](data-quality.md).
+
+2. **`series_conditional`**: branch on the anchor's `initial` flag; each
+   branch is a two-component lognormal mixture (in-series vs series-gap,
+   split at the geometric midpoint of the window's p25/p75) weighted by the
+   branch's empirical continue rate — post-initial ~82% continue, ~40%
+   after later eruptions. On a window that is not clearly bimodal it
+   degrades to the pooled fit, so it is safe in any roster.
+
+Walk-forward, 3 years, 2,000 evaluations:
+
+| model | CRPS | MAE | 50% cov | 90% cov |
+|---|---:|---:|---:|---:|
+| **series_conditional** | **119.4** | **187.6** | 61% | 89% |
+| weibull_aft | 134.2 | 196.1 | 46% | 91% |
+| best_parametric | 141.1 | 204.4 | 34% | 94% |
+
+−15.4% CRPS against the default — decisive by the noise rule, so Lion is
+pinned in `BEST_MODEL_BY_GEYSER`. Note the unconditional models' 50%
+coverage of ~33%: a unimodal fit cannot cover a bimodal reality no matter
+how wide it stretches. Also note `weibull_aft` placing *second* — its only
+non-bottom-half finish, because Lion is the first geyser whose process has
+real state for covariates to carry.
+
+The renewal forecast's chained draws use the **pooled mixture** as the
+step distribution (`fit_marginal`), not a plain lognormal — a lognormal
+fitted to bimodal data puts its median in the empty valley between the
+modes and describes nothing that actually happens.
+
+Honest coverage (scored against **every** raw gap): only 11.1% of Lion's
+gaps are rejected by the filter — least in the set after Beehive, a direct
+consequence of the second-mode band recognising series gaps as real — and
+the honest 90% band catches 85.5%. The honest 50% is a poor 30.5%: with a
+bimodal spread the central band often straddles the empty valley, which is
+a structural cost of the shape, not a fixable calibration error.
 
 ## What production serves, and why
 
 `models.BEST_MODEL_BY_GEYSER`:
 
 ```python
-{"Old Faithful": "minor_conditional", "Castle": "minor_conditional"}
+{"Old Faithful": "minor_conditional", "Castle": "minor_conditional",
+ "Lion": "series_conditional"}
 # everything else falls back to best_parametric
 ```
 
@@ -156,7 +204,9 @@ failed.
 ### The covariate survival model does not earn its complexity
 
 `weibull_aft` (lifelines Weibull AFT with previous interval, hour of day, day of
-year, entry flags) ranks in the **bottom half on all eight geysers**. Simple
+year, entry flags) ranks in the **bottom half on all eight unimodal geysers**.
+(On Lion it lands second -- covariates help when the process really has state --
+but still 11% behind the purpose-built series model.) Simple
 rolling lognormal/Weibull fits beat it nearly everywhere, and a plain rolling
 mean ± window — essentially what the existing community dashboard shows — wins
 outright on Beehive.

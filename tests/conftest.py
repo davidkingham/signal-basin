@@ -157,6 +157,30 @@ def _build() -> None:
     rows += _rows("Plume", ep[is_minor], next_id, **{"min": "1"})
     next_id += int(is_minor.sum()) + 10
 
+    # Lion erupts in SERIES: an initial (flagged `ini`), one to three more at
+    # ~83-minute spacing, then ~10 hours of quiet before the next initial. The
+    # fixture mirrors that structure so the series-conditional model and the
+    # ingest filter's second-mode band are both exercised by the real SQL --
+    # a filter without the second-mode band deletes every series gap here.
+    ep_l: list[float] = []
+    ini_l: list[bool] = []
+    t = 0.0
+    while len(ep_l) < 1300:
+        ep_l.append(t)
+        ini_l.append(True)
+        for _ in range(int(_rng.integers(1, 4))):
+            t += _rng.lognormal(np.log(83.0), 0.08) * 60.0
+            ep_l.append(t)
+            ini_l.append(False)
+        t += _rng.lognormal(np.log(600.0), 0.25) * 60.0
+    ep_lion = np.asarray(ep_l)
+    ep_lion = (ep_lion - ep_lion[-1] + END_EPOCH).astype(np.int64)
+    ini_arr = np.asarray(ini_l)
+    rows += _rows("Lion", ep_lion[~ini_arr], next_id)
+    next_id += int((~ini_arr).sum()) + 10
+    rows += _rows("Lion", ep_lion[ini_arr], next_id, ini="1")
+    next_id += int(ini_arr.sum()) + 10
+
     con.executemany(
         f"INSERT INTO eruptions_raw VALUES ({', '.join(['?'] * len(RAW_COLUMNS))})", rows
     )

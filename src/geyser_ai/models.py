@@ -418,6 +418,91 @@ class MinorConditionalModel:
         return Prediction(dist, self.name) if dist is not None else None
 
 
+class SeriesConditionalModel:
+    """Lion-style series geysers: condition on whether the anchor was the INITIAL.
+
+    Lion erupts in series -- an initial, then a few more at ~80-minute spacing,
+    then hours of quiet. Every interval is therefore a draw from a MIXTURE:
+    "the series continues" (short, tight) against "the series is over" (long,
+    wide), and the continue probability depends strongly on what the anchor
+    was: ~82% of post-initial intervals continue the series against ~40% after
+    later eruptions (2y of data). The `ini` flag is recorded by observers at
+    logging time, so it is legitimately known at prediction time -- the same
+    property that makes the `minor` flag the best covariate in the project.
+
+    Mechanically: split the rolling window at the geometric midpoint of its
+    p25/p75 (the valley between modes sits well inside that gap), fit a
+    lognormal to each mode, and weight them by the anchor branch's empirical
+    continue rate. `TailMixture` supplies the two-component distribution.
+    On a window that is not clearly bimodal this degrades to the pooled fit,
+    so the model is safe in the roster for any geyser.
+    """
+
+    name = "series_conditional"
+
+    # Below this p75/p25 ratio the window is not bimodal and mode-splitting
+    # would be noise-chasing. Mirrors ingest.SECOND_MODE_RATIO.
+    MIN_MODE_RATIO = 3.5
+
+    def __init__(self, window: int = 600) -> None:
+        self.window = window
+
+    @staticmethod
+    def _lognorm_from(x: np.ndarray, min_n: int = 25) -> stats.rv_continuous | None:
+        x = x[np.isfinite(x) & (x > 0)]
+        if len(x) < min_n:
+            return None
+        logs = np.log(x)
+        sd = max(float(np.std(logs, ddof=1)), _MIN_SCALE)
+        return stats.lognorm(s=sd, scale=np.exp(float(np.mean(logs))))
+
+    def _modes(self, v: np.ndarray):
+        """(short_dist, long_dist, split) or None when the window is unimodal."""
+        p25, p75 = np.percentile(v, [25, 75])
+        if p25 <= 0 or p75 < self.MIN_MODE_RATIO * p25:
+            return None
+        split = float(np.sqrt(p25 * p75))
+        short = self._lognorm_from(v[v < split])
+        long = self._lognorm_from(v[v >= split])
+        if short is None or long is None:
+            return None
+        return short, long, split
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        h = history.tail(self.window)
+        if len(h) < 80:
+            return None
+        v = h["interval_min"].to_numpy(dtype=float)
+        modes = self._modes(v)
+        if modes is None or "prev_initial" not in h.columns:
+            pooled = self._lognorm_from(v)
+            return Prediction(pooled, self.name) if pooled is not None else None
+        short, long, split = modes
+
+        was_initial = bool(row.get("prev_initial", False))
+        flag = h["prev_initial"].astype(bool).to_numpy()
+        sel = flag == was_initial
+        # Branch continue-rate, falling back to the pooled rate on thin data.
+        basis = v[sel] if sel.sum() >= 25 else v
+        w_long = float(np.clip((basis >= split).mean(), 0.05, 0.95))
+        return Prediction(TailMixture(short, long, w_long), self.name)
+
+    def fit_marginal(self, history: pd.DataFrame):
+        """Pooled two-mode mixture, for the renewal forecast's chained draws.
+
+        A missed-eruption chain steps through eruptions of UNKNOWN series
+        position, so its step distribution is the pooled mixture -- a plain
+        lognormal fitted to bimodal data lands its median in the empty valley
+        between the modes and describes nothing that actually happens.
+        """
+        v = history.tail(self.window)["interval_min"].to_numpy(dtype=float)
+        modes = self._modes(v) if len(v) >= 80 else None
+        if modes is None:
+            return None
+        short, long, split = modes
+        return TailMixture(short, long, float(np.clip((v >= split).mean(), 0.05, 0.95)))
+
+
 class EntryTypeConditionalModel:
     """Condition on whether the ANCHOR eruption came from an electronic logger.
 
@@ -578,6 +663,13 @@ class WeibullAFTModel:
 # conditional model would just be a slower copy of `lognormal`.
 MINOR_MODE_GEYSERS = frozenset({"Castle", "Old Faithful"})
 
+# Geysers that erupt in SERIES -- short in-series intervals against long
+# between-series gaps, with the observer-recorded `ini` flag marking the series
+# start. The series-conditional model only makes sense where that structure
+# exists (Lion: ~80 min in-series vs ~10 h between series, `initial` on ~19%
+# of entries).
+SERIES_GEYSERS = frozenset({"Lion"})
+
 # Which model actually serves each geyser.
 #
 # `best_parametric` is the right default -- it picks lognormal against Weibull
@@ -590,8 +682,9 @@ MINOR_MODE_GEYSERS = frozenset({"Castle", "Old Faithful"})
 # following a minor is a different process rather than a noisy draw from the
 # same one:
 #
-#     Old Faithful  minor_conditional CRPS 4.51  vs best_parametric 8.78   (-49%)
-#     Castle        minor_conditional CRPS 77.2  vs best_parametric 172.5  (-55%)
+#     Old Faithful  minor_conditional  CRPS 4.7   vs best_parametric 8.9    (-47%)
+#     Castle        minor_conditional  CRPS 77.6  vs best_parametric 173.0  (-55%)
+#     Lion          series_conditional CRPS 119.4 vs best_parametric 141.1  (-15%)
 #
 # Serving `best_parametric` everywhere quietly threw that away. Regenerate the
 # evidence with `uv run geyser-ai backtest`; the table lives in
@@ -599,6 +692,7 @@ MINOR_MODE_GEYSERS = frozenset({"Castle", "Old Faithful"})
 BEST_MODEL_BY_GEYSER: dict[str, str] = {
     "Old Faithful": "minor_conditional",
     "Castle": "minor_conditional",
+    "Lion": "series_conditional",
 }
 
 
@@ -652,6 +746,10 @@ class TailMixture:
 
     def pdf(self, x):
         return (1 - self.w) * self.narrow.pdf(x) + self.w * self.wide.pdf(x)
+
+    def logpdf(self, x):
+        with np.errstate(divide="ignore"):
+            return np.log(self.pdf(x))
 
     def ppf(self, q):
         q = np.asarray(q, dtype=float)
@@ -822,6 +920,8 @@ def default_models(geyser: str) -> list[Model]:
         models.append(DurationConditionalModel(window=400))
     if geyser in MINOR_MODE_GEYSERS:
         models.append(MinorConditionalModel(window=400))
+    if geyser in SERIES_GEYSERS:
+        models.append(SeriesConditionalModel(window=600))
     if geyser in LOGGER_HEAVY_GEYSERS:
         models.append(EntryTypeConditionalModel(window=400))
     return models
