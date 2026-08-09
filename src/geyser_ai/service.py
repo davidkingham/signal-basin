@@ -199,7 +199,9 @@ def get_predictions(
 
     ok = [r for r in out if "error" not in r]
     bad = [r for r in out if "error" in r]
-    ok.sort(key=lambda r: r["minutes_until"])
+    # Planning-mode cards make no clock-time claim, so "soonest first" does
+    # not apply to them -- they sit below every live prediction.
+    ok.sort(key=lambda r: (r.get("display_mode") == "planning", r["minutes_until"]))
     payload = {
         "generated_utc": pd.Timestamp.now(tz="UTC").isoformat(),
         "park_time": pd.Timestamp.now(tz=PARK_TZ).strftime("%Y-%m-%d %H:%M %Z"),

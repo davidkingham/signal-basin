@@ -102,3 +102,17 @@ class TestPlanningMode:
             ]
         }
         assert _our_logged_predictions(payload) == []
+
+
+class TestPlanningCardsSortLast:
+    def test_planning_mode_sits_below_every_live_prediction(self):
+        import geyser_ai.service as svc
+
+        payload = svc.get_predictions(do_sync=False, density_points=16, record=False)
+        modes = [
+            p.get("display_mode") == "planning" for p in payload["predictions"] if "error" not in p
+        ]
+        # Once the first planning card appears, everything after must also be
+        # planning -- i.e. no live card below a planning card.
+        assert modes == sorted(modes), "a live prediction sorted below a planning card"
+        assert modes[-1], "the fixture's stale Lone Star must be last"
