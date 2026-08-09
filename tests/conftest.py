@@ -67,6 +67,7 @@ GEYSER_SPECS = {
     "Beehive": (1100.0, 0.22),
     "Fountain": (305.0, 0.21),
     "Artemisia": (1320.0, 0.21),
+    "Little Squirt": (3500.0, 0.24),
 }
 
 # Anchored just before "now" so the recent-eruptions endpoint and data-age
@@ -200,6 +201,22 @@ def _build() -> None:
     minors = (maj_kept[has_minor] - _rng.normal(37, 6, has_minor.sum()) * 60).astype(np.int64)
     rows += _rows("Lone Star", minors, next_id, **{"min": "1"})
     next_id += len(minors) + 10
+
+    # Till: like Lone Star but with AFTERPLAY minors (~1 h after the major)
+    # instead of precursors, and a 12-hour cycle. Last major 5 cycles back:
+    # inside Till's 8-cycle phase window, so its default serving state is
+    # LIVE -- the opposite pole from the Lone Star fixture.
+    n = 500
+    ivs = _rng.lognormal(np.log(729.0), 0.08, n) * 60.0
+    maj = END_EPOCH - 5 * 729 * 60 - np.cumsum(ivs)[::-1]
+    keep = _rng.random(n) > 0.5
+    maj_kept = maj[keep].astype(np.int64)
+    rows += _rows("Till", maj_kept, next_id, maj="1")
+    next_id += n + 10
+    has_after = _rng.random(len(maj_kept)) < 0.5
+    afters = (maj_kept[has_after] + _rng.normal(60, 15, has_after.sum()) * 60).astype(np.int64)
+    rows += _rows("Till", afters, next_id, **{"min": "1"})
+    next_id += len(afters) + 10
 
     con.executemany(
         f"INSERT INTO eruptions_raw VALUES ({', '.join(['?'] * len(RAW_COLUMNS))})", rows

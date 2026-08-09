@@ -693,6 +693,12 @@ BEST_MODEL_BY_GEYSER: dict[str, str] = {
     "Old Faithful": "minor_conditional",
     "Castle": "minor_conditional",
     "Lion": "series_conditional",
+    # Till's cycle has drifted across its recorded history (613 min all-time
+    # vs ~729 recently), and the long-window parametric fits train on the old
+    # regime: best_parametric scores 63.5 CRPS against adaptive_lognormal's
+    # 27.1 (-57%, decisive). rolling_normal ties on CRPS (26.9) but loses on
+    # MAE (36.6 vs 33.9).
+    "Till": "adaptive_lognormal",
 }
 
 

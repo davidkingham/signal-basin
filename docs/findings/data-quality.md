@@ -178,6 +178,12 @@ pre-fix "valid" set with median 1270 and log-sd 1.35. Every other geyser's
 rows were verified unchanged by rules 2 and 3 (they key on the geyser name),
 and rule 1 removed exactly the 730 Lone Star minor-entry rows.
 
+Till joined the same rule set the next day (afterplay minors in the first
+~10% of its cycle rather than precursors before it; singles ~30% of gaps)
+and went from "log-sd 2.16 at a 12-minute median" to a 12-hour cycle at
+log-sd 0.072 — the tightest long-interval geyser in the project, hidden
+entirely inside data-cleaning assumptions.
+
 ### A trap when comparing filter generations
 
 Changing the filter changes *which intervals are in the evaluation set*, so CRPS

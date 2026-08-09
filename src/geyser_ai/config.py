@@ -35,15 +35,20 @@ TARGET_GEYSERS: tuple[str, ...] = (
     "Lion",
     "Artemisia",
     "Lone Star",
+    "Till",
+    "Little Squirt",
 )
 
-# Geysers whose anchor loses phase information faster than reports arrive.
-# Lone Star: backcountry, median entry latency 2.7 h against a 186-minute
-# cycle whose phase decoheres in ~2-3 intervals (per-cycle jitter ~23 min,
-# compounding as a random walk). A prediction from a stale anchor is
-# "sometime in the next cycle" dressed up as a time, so the dashboard shows
-# a PLANNING card instead unless the anchor is genuinely fresh.
-PHASE_LIMITED_GEYSERS: frozenset[str] = frozenset({"Lone Star"})
-# Show a live prediction while the anchor is under this many median cycles
-# old; beyond it the 90% band exceeds what knowing nothing would give.
-PHASE_WINDOW_CYCLES = 2.5
+# Geysers whose anchor can outlive its phase information. A prediction from
+# a phase-dead anchor is "sometime in the next cycle" dressed up as a time,
+# so the dashboard shows a PLANNING card unless the anchor is fresher than
+# the geyser's measured phase window (in median cycles). The windows are
+# EMPIRICAL -- residuals against `anchor + k x cycle` -- not derived from a
+# random-walk model, which understates decoherence:
+#   Lone Star  2.5  (90% band +/-45 min at k=1, gone by k=3; jitter 12%/cycle)
+#   Till       8.0  (+/-78 at k=1, +/-183 at k=8, ceiling ~k=16; jitter 7%/cycle)
+PHASE_WINDOW_CYCLES: dict[str, float] = {
+    "Lone Star": 2.5,
+    "Till": 8.0,
+}
+PHASE_LIMITED_GEYSERS: frozenset[str] = frozenset(PHASE_WINDOW_CYCLES)

@@ -60,7 +60,14 @@ SECOND_MODE_RATIO = 3.5
 # out 1270 min against a true 186-minute cycle). For these geysers the anchor
 # drops to the 10th percentile -- still safely above duplicate-entry noise,
 # which the 60-second dedupe pass and the 0.5x floor already handle.
-SPARSE_SINGLES_GEYSERS = frozenset({"Lone Star"})
+SPARSE_SINGLES_GEYSERS = frozenset({"Lone Star", "Till"})
+
+# Geysers whose minor-flagged entries are not cycle events: Lone Star's
+# minors PRECEDE the major by ~37 min (precursors); Till's are afterplay in
+# the first ~10% of the cycle. Chained as eruptions they shatter the true
+# cycle into phantom modes, so they leave the interval chain entirely --
+# the same reasoning that keeps Beehive's Indicator out of Beehive's chain.
+NON_CYCLE_MINOR_GEYSERS = frozenset({"Lone Star", "Till"})
 # Rows a regime needs before it gets its own validity baseline. Below this the
 # geyser almost certainly has no real minor mode, just a few stray flags.
 MIN_REGIME_ROWS = 200
@@ -303,20 +310,17 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
     print("Building `intervals` table ...")
     con.execute("DROP TABLE IF EXISTS intervals")
     sparse_singles = ", ".join(f"'{g}'" for g in sorted(SPARSE_SINGLES_GEYSERS))
+    non_cycle_minor = ", ".join(f"'{g}'" for g in sorted(NON_CYCLE_MINOR_GEYSERS))
     con.execute(
         f"""
         CREATE TABLE intervals AS
         WITH cycle_events AS (
-            -- Lone Star's minors are PRECURSORS, not cycle events: a minor
-            -- precedes the major of the same cycle by ~37 min (IQR 28-44,
-            -- n=107 over 3y). Chaining them as eruptions injects ~37 and
-            -- ~150-minute phantom intervals into a 186-minute cycle and put
-            -- its log-sd at 1.5; the major-only chain is log-sd 0.124. The
-            -- same reasoning already keeps Beehive's Indicator out of
-            -- Beehive's chain -- there it is a separate geyser name, here it
-            -- is a flag on the same name.
+            -- Some geysers' minors are not cycle events; see
+            -- NON_CYCLE_MINOR_GEYSERS. Chaining them as eruptions shatters
+            -- the true cycle into phantom modes (Lone Star read log-sd 1.5
+            -- against a majors-only 0.124).
             SELECT * FROM eruptions
-            WHERE NOT (geyser = 'Lone Star' AND minor)
+            WHERE NOT (geyser IN ({non_cycle_minor}) AND minor)
         ),
         deduped AS (
             -- collapse multiple observers logging the same eruption

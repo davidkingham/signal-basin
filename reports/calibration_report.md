@@ -87,6 +87,18 @@ At every evaluated eruption each model sees **only** intervals strictly earlier 
 | Lone Star | rolling_normal | 72 | 15.3 | 20.0 | 56.9% · | 91.7% |
 | Lone Star | weibull_aft | 72 | 15.9 | 20.5 | 66.7% ⚠ | 90.3% |
 | Lone Star | weibull | 72 | 16.1 | 19.8 | 73.6% ⚠ | 97.2% · |
+| Till | **rolling_normal** | 69 | 26.9 | 36.6 | 49.3% | 89.9% |
+| Till | adaptive_lognormal | 69 | 27.0 | 33.9 | 58.0% · | 87.0% |
+| Till | lognormal | 69 | 49.0 | 65.8 | 81.2% ⚠ | 97.1% · |
+| Till | weibull | 69 | 51.1 | 55.6 | 91.3% ⚠ | 98.6% · |
+| Till | best_parametric | 69 | 63.5 | 91.5 | 73.9% ⚠ | 100.0% · |
+| Till | weibull_aft | 69 | 77.2 | 116.5 | 34.8% ⚠ | 94.2% |
+| Little Squirt | **rolling_normal** | 313 | 536.2 | 763.1 | 44.1% · | 87.2% |
+| Little Squirt | adaptive_lognormal | 313 | 543.4 | 777.2 | 43.5% · | 88.2% |
+| Little Squirt | lognormal | 313 | 550.0 | 790.0 | 43.5% · | 88.2% |
+| Little Squirt | best_parametric | 313 | 555.7 | 805.2 | 40.6% · | 90.1% |
+| Little Squirt | weibull | 313 | 561.9 | 821.4 | 48.2% | 91.1% |
+| Little Squirt | weibull_aft | 313 | 779.2 | 1,182.2 | 31.6% ⚠ | 94.6% |
 
 **Bold** = best CRPS for that geyser.
 
@@ -105,13 +117,15 @@ At every evaluated eruption each model sees **only** intervals strictly earlier 
 | Lion | series_conditional | 119.4 | 149.4 | 20.0% |
 | Artemisia | best_parametric | 174.9 | 180.8 | 3.3% |
 | Lone Star | adaptive_lognormal | 14.9 | 15.3 | 2.7% |
+| Till | rolling_normal | 26.9 | 26.9 | 0.0% |
+| Little Squirt | rolling_normal | 536.2 | 536.2 | 0.0% |
 
 ## Known gaps
 
 - **Castle** — the best model (`minor_conditional`) is far too wide: its nominal 50% interval actually covers 61%. The predicted distribution is the wrong *shape*, not just the wrong width.
 - **Lion** — the best model (`series_conditional`) is far too wide: its nominal 50% interval actually covers 61%. The predicted distribution is the wrong *shape*, not just the wrong width.
 
-- **The covariate model did not earn its complexity.** `weibull_aft` (lifelines Weibull AFT with previous-interval, clock-time, seasonal and entry-flag covariates) ranks in the bottom half on 10 of 11 geysers: Old Faithful 5/8, Grand 7/7, Daisy 7/7, Riverside 6/6, Castle 5/8, Great Fountain 7/7, Beehive 6/6, Fountain 6/6, Lion 2/7, Artemisia 6/6, Lone Star 5/6. The simple rolling lognormal/Weibull fits beat it nearly everywhere, and the dashboard-style baseline is competitive. Reported as-is.
+- **The covariate model did not earn its complexity.** `weibull_aft` (lifelines Weibull AFT with previous-interval, clock-time, seasonal and entry-flag covariates) ranks in the bottom half on 12 of 13 geysers: Old Faithful 5/8, Grand 7/7, Daisy 7/7, Riverside 6/6, Castle 5/8, Great Fountain 7/7, Beehive 6/6, Fountain 6/6, Lion 2/7, Artemisia 6/6, Lone Star 5/6, Till 6/6, Little Squirt 6/6. The simple rolling lognormal/Weibull fits beat it nearly everywhere, and the dashboard-style baseline is competitive. Reported as-is.
 
 
 ### Honest coverage: scoring the intervals the filter throws away
@@ -132,6 +146,8 @@ Everything above is measured only on intervals that passed the validity filter, 
 | Lion | 1,500 | 11.1% | 30.5% | 85.5% | 93.8% |
 | Artemisia | 548 | 29.6% | 36.9% | 60.8% | 86.3% |
 | Lone Star | 228 | 68.4% | 18.0% | 29.4% | 93.1% |
+| Till | 232 | 70.3% | 24.1% | 28.9% | 97.1% |
+| Little Squirt | 363 | 13.8% | 37.5% | 76.0% | 88.2% |
 
 The drop between the last two columns is the real-world penalty. Treat the headline table as an upper bound on field reliability, and see the renewal/missed-eruption handling in `predict` (README) for how the CLI compensates at prediction time.
 
@@ -146,13 +162,13 @@ Each decision time is scored **twice, identically**, with neighbour conditioning
 
 | Geyser | Regime | n | CRPS off | CRPS on | Δ | 90% off | 90% on |
 |---|---|---:|---:|---:|---:|---:|---:|
-| Grand | **overall** | 21,420 | 44.4 | 44.4 | +0.1% | 90% | 90% |
-| Grand | base | 18,043 | 43.7 | 43.7 | +0.0% | 90% | 90% |
-| Grand | precursor_shifted | 1,685 | 53.8 | 54.5 | +1.3% | 87% | 86% |
-| Grand | turban_gated | 1,692 | 42.4 | 42.5 | +0.3% | 92% | 92% |
-| Beehive | **overall** | 30,689 | 118.3 | 115.0 | -2.8% | 86% | 89% |
-| Beehive | base | 28,636 | 116.2 | 116.2 | +0.0% | 90% | 90% |
-| Beehive | indicator_active | 2,053 | 147.7 | 97.8 | -33.8% | 30% | 87% |
+| Grand | **overall** | 21,416 | 44.3 | 44.4 | +0.2% | 90% | 90% |
+| Grand | base | 18,030 | 43.6 | 43.6 | +0.0% | 90% | 90% |
+| Grand | precursor_shifted | 1,684 | 53.7 | 54.4 | +1.3% | 88% | 86% |
+| Grand | turban_gated | 1,702 | 42.4 | 42.6 | +0.3% | 92% | 92% |
+| Beehive | **overall** | 30,691 | 118.3 | 115.0 | -2.7% | 86% | 89% |
+| Beehive | base | 28,634 | 116.2 | 116.1 | -0.0% | 90% | 90% |
+| Beehive | indicator_active | 2,057 | 147.6 | 99.6 | -32.5% | 30% | 87% |
 
 **Beehive's Indicator works.** In the minutes it is running, CRPS falls by about a third and nominal 90% coverage goes from badly overconfident to roughly honest. The no-Indicator regime is untouched, which is the point — the conditioning adds information only when there is information to add. Residual error in that regime is dominated by cycles where the Beehive eruption itself was never logged (~6% of Indicator entries), not by the model.
 
@@ -170,7 +186,7 @@ Each decision time is scored **twice, identically**, with neighbour conditioning
 
 ## Data-quality notes
 
-- Of 1,339,680 consecutive-eruption gaps, 1,076,585 (80.4%) pass the per-geyser plausibility filter (0.35x-3x that geyser's median). The rest are overwhelmingly observation gaps — nobody is watching Riverside at 3am in February — not real eruptions.
+- Of 1,338,654 consecutive-eruption gaps, 1,075,432 (80.3%) pass the per-geyser plausibility filter (0.35x-3x that geyser's median). The rest are overwhelmingly observation gaps — nobody is watching Riverside at 3am in February — not real eruptions.
 
 - The ceiling is **1.75x** the median rather than the more obvious 3x because the interval histograms show clear **harmonics**: Riverside clusters at ~390, ~780 and ~1150 minutes, Great Fountain at ~686 and ~1400. Those secondary peaks sit at exactly 2x and 3x the median and are one and two missed eruptions. A 3x ceiling admits them, and models trained on the contaminated series predict distributions far wider than reality — it was worth several times more CRPS than any modeling choice in this report.
 
@@ -186,8 +202,10 @@ Observation-entry mix since 2015 (% of valid intervals):
 | Grand | 45.8% | 15.5% | 1.2% | 5.2% |
 | Great Fountain | 0.0% | 62.5% | 0.8% | 2.6% |
 | Lion | 69.9% | 4.4% | 0.2% | 9.4% |
+| Little Squirt | 52.8% | 17.3% | 0.4% | 78.1% |
 | Lone Star | 0.0% | 0.0% | 15.9% | 2.6% |
 | Old Faithful | 91.1% | 3.8% | 0.3% | 3.4% |
 | Riverside | 62.0% | 1.1% | 1.2% | 21.9% |
+| Till | 0.0% | 59.3% | 0.9% | 12.8% |
 
 Data courtesy of [GeyserTimes.org](https://geysertimes.org) and its community of volunteer observers.

@@ -530,15 +530,20 @@ class TestScoreboardNeverBreaksPredictions:
 class TestOurPredictionsAreLogged:
     def test_a_full_run_records_every_geyser_once(self):
         import geyser_ai.service as svc
-        from geyser_ai.config import PHASE_LIMITED_GEYSERS
 
-        svc.get_predictions(do_sync=False, density_points=16)
+        payload = svc.get_predictions(do_sync=False, density_points=16)
         led = ledger_mod.get_ledger()
         ours = [p for p in led.open.values() if p.source == "geyser_ai"]
-        # Phase-limited geysers in planning mode make no clock-time claim, so
-        # they are deliberately absent -- the fixture's Lone Star anchor is 20h
-        # old, well past its phase window.
-        expected = set(svc.TARGET_GEYSERS) - PHASE_LIMITED_GEYSERS
+        # A planning-mode card makes no clock-time claim, so it is deliberately
+        # absent from the ledger. The fixture pins both poles: Lone Star's
+        # anchor is 20 h old (past its 2.5-cycle window -> planning), Till's is
+        # 5 cycles old (inside its 8-cycle window -> live and logged).
+        expected = {
+            p["geyser"]
+            for p in payload["predictions"]
+            if "error" not in p and p.get("display_mode") != "planning"
+        }
+        assert "Till" in expected and "Lone Star" not in expected
         assert {p.geyser for p in ours} == expected
         assert all(p.window_open_epoch and p.inner_open_epoch for p in ours)
 

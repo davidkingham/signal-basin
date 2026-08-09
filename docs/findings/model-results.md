@@ -23,10 +23,14 @@ Regenerate with `uv run geyser-ai backtest`; the full table lives in
 | Lion | `series_conditional` | 119.4 | 187.6 | 61% | 89% |
 | Artemisia | `best_parametric` | 174.9 | 240.3 | 53% | 86% |
 | Lone Star* | `best_parametric` | 14.9 | 20.1 | 60% | 94% |
+| Till* | `adaptive_lognormal` | 27.0 | 33.9 | 58% | 87% |
+| Little Squirt | `best_parametric` | 555.7 | 805.2 | 41% | 90% |
 
-\* Lone Star serves a live prediction only when its anchor is fresh enough to
-carry phase (~7% of summer-daytime moments); otherwise a planning card that
-makes no clock-time claim. Its numbers are for exactly that live window.
+\* Phase-limited: a live prediction appears only while the anchor is fresher
+than the geyser's measured phase window (Lone Star 2.5 cycles, ~7% of
+summer-daytime moments; Till 8 cycles — its reports arrive in real time, so
+it is live whenever anyone has visited within ~4 days); otherwise a planning
+card that makes no clock-time claim. Their numbers are for the live window.
 
 ## The single most important result
 
@@ -178,6 +182,34 @@ Artemisia takes no `BEST_MODEL_BY_GEYSER` entry — nothing to pin. Calibration
 
 Neither the NPS nor Geysers.net predicts it. One eruption a day means the
 scoreboard will accumulate slowly; patience before judging its live numbers.
+
+## Till and Little Squirt, twelve and thirteen (added 2026-08-09)
+
+Both were flushed out by re-running the candidate sweep with the Lone Star
+lessons applied — precursor-flag exclusion and the p10 sparse-singles anchor
+— which is exactly how Till's earlier dismissal ("log-sd 2.16 at a 12-minute
+median") dissolved: 297 of its 477 recent entries are afterplay minors in
+the first ~10% of the cycle, and once they leave the chain, Till is a
+**12-hour cycle at log-sd 0.072** — the tightest long-interval geyser in the
+project. Unlike Lone Star its reports arrive in real time (median latency
+~1 minute, 78% within 30). Its phase carries much further too — measured
+decoherence: ±78 min at one cycle, ±183 at eight, no-information ceiling
+(±346) near sixteen — so its phase window is **8 cycles (~4 days)** and the
+card is live whenever anyone has visited recently. One more Till lesson:
+its cycle has drifted across the record (613 min all-time vs ~729 now), and
+the long-window parametric fits train on the old regime — `best_parametric`
+scored 63.5 CRPS against `adaptive_lognormal`'s 27.1, a decisive −57%, so
+Till is pinned. Honest coverage carries the usual sparse-geyser caveat:
+70.3% of raw gaps are rejected, honest 90% = 28.9%.
+
+**Little Squirt** needed no special treatment at all — everyone had simply
+overlooked it: a ~58-hour cycle (76 h all-time; it has lengthened) at
+log-sd 0.237, **91% of raw gaps are true single intervals** (13.8%
+rejected — the cleanest observation record in the set), 61% of entries from
+the Old Faithful webcam, and an anchor inside its window 94% of the time.
+`rolling_normal` beats the default by 3.5% — inside the noise rule — so it
+serves `best_parametric`. Honest 90% coverage 76.0%, better than most of
+the frontcountry set. Slow accumulation: ~12 scored eruptions a month.
 
 ## What production serves, and why
 

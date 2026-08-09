@@ -54,6 +54,18 @@ class TestPlanningMode:
         )
         assert r["phase_window_min"] > 0
 
+    def test_till_inside_its_window_serves_live(self):
+        """Till's fixture anchor is 5 cycles old -- inside its 8-cycle window."""
+        r = predict_geyser("Till")
+        assert r is not None
+        assert r["display_mode"] == "live"
+        assert r["model"] == "adaptive_lognormal"
+
+    def test_till_intervals_exclude_afterplay_minors(self):
+        h = load_intervals("Till")
+        med = float(h["interval_min"].median())
+        assert 600 < med < 850, f"median {med:.0f}: afterplay minors leaked into the chain"
+
     def test_fresh_anchor_serves_live(self, monkeypatch):
         """The same gate must open when the anchor carries phase."""
         import geyser_ai.predict as predict_mod
@@ -61,6 +73,9 @@ class TestPlanningMode:
         # Plume's fixture anchor is minutes old; borrowing it isolates the
         # gate logic from the fixture's deliberately-stale Lone Star anchor.
         monkeypatch.setattr(predict_mod, "PHASE_LIMITED_GEYSERS", frozenset({"Plume", "Lone Star"}))
+        monkeypatch.setattr(
+            predict_mod, "PHASE_WINDOW_CYCLES", {**predict_mod.PHASE_WINDOW_CYCLES, "Plume": 2.5}
+        )
         r = predict_geyser("Plume")
         assert r["display_mode"] == "live"
 

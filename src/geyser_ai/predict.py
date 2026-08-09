@@ -277,7 +277,7 @@ def predict_geyser(
     # instead of a number that pretends to more than the physics allows; the
     # dashboard renders a planning card, and the ledger logs nothing.
     if geyser in PHASE_LIMITED_GEYSERS:
-        phase_window = PHASE_WINDOW_CYCLES * naive_med
+        phase_window = PHASE_WINDOW_CYCLES[geyser] * naive_med
         result["phase_window_min"] = round(phase_window, 1)
         result["display_mode"] = "planning" if age_min > phase_window else "live"
 
