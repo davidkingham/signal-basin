@@ -84,6 +84,39 @@ puts a false "STEAMBOAT ERUPTING" banner on the most-watched geyser claim in
 the park, and one false banner would cost more trust than a year of good
 predictions buys.
 
+## Round two: the two-station design also fails, measured
+
+The YNM/YNB amplitude-ratio design was validated the same day and does not
+survive contact with the data either. Three measurements killed it:
+
+1. **YNB barely records Steamboat.** During confirmed majors, YNB rises only
+   1.1–2.1× (against YNM's 6–14×) — which would have made it an ideal quiet
+   reference, except:
+2. **YNB is unreliable as a reference.** Its 15-minute medians drop to
+   near-zero in ordinary windows (dead-channel episodes), so the ratio-shift
+   test produced **8–25× scores on false positives** — indistinguishable
+   from real eruptions (5–36×).
+3. **YNM's false onsets are local too.** Sixteen eruption-free control days
+   produced 7 sustained-onset candidates — every one between 9 and 11 am
+   local, i.e. cultural noise at the Norris Museum itself, which is a local
+   source just like Steamboat and therefore passes any two-station test.
+   And no amplitude floor separates them: real onsets sustain 5.9k–16k
+   counts, false ones 3.2k–5.7k — the weak 2025-04-14 eruption sits inside
+   the false-positive range.
+
+Detection coverage is also worse than it first appeared: YNM has no usable
+data at 4 of 13 eruption times since late 2023 (telemetry gaps and one
+flatlined channel), and one eruption is seismically weak everywhere.
+
+**Where this leaves the detector**: amplitude features at these stations
+cannot meet "≈zero false positives with useful sensitivity." The credible
+next rung is spectral discrimination — hydrothermal tremor and boardwalk
+noise have different frequency content — which requires a labeled
+spectrogram dataset across seasons and real signal-processing work.
+Until someone does that work and validates a false-positive rate, the
+Steamboat card stays context-only. Two rounds of measurement now say so;
+a third attempt should start from the spectral features, not amplitude.
+
 ## What shipped instead
 
 A Steamboat **context card**: days since the last major, the recent interval
@@ -94,9 +127,10 @@ already synced; no seismic dependency.
 
 ## Where seismic integration would actually pay, ranked
 
-1. **Steamboat detection** (two-station design above) — the only geyser
-   where seismic sees something nothing else does, hours before a human
-   report reaches GeyserTimes.
+1. **Steamboat detection** — still the only geyser where seismic sees
+   something nothing else does, hours before a human report reaches
+   GeyserTimes. But both amplitude designs are now measured failures; the
+   viable path starts from spectral features with a labeled dataset.
 2. **OF preplay research** via YFT — published precedent for minutes-scale
    precursors; an Indicator-style nowcast someday. The 24/7 webcam already
    covers detection, so only the precursor angle adds value.
