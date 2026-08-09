@@ -17,7 +17,7 @@ at almost exactly 2× and 3× the median: Riverside clusters near 390, 780 and
 1150 minutes; Great Fountain near 686 and 1400. Those are not long intervals.
 They are one and two eruptions nobody logged.
 
-## The validity filter, and its five generations
+## The validity filter, and its six generations
 
 An interval is marked `is_valid` only if it is plausible for that geyser. The
 rule is simple; getting the *baseline* right took four attempts, and each attempt
@@ -146,6 +146,37 @@ Three geysers gained a few *historical* rows — Fountain +532 (3.1–3.6× the
 short mode, consistent with its documented Morning-active long regime),
 Daisy +116 and Castle +76 (pre-2000 only, 4.2–9.3×) — none in the 2020s, so
 no production training window changed for the existing eight.
+
+### Generation 6 — backcountry data breaks three assumptions at once
+
+Lone Star (added 2026-08-09 in planning mode) required three targeted rules,
+each of which broke a different assumption the filter had been standing on:
+
+1. **Not every logged event is a cycle event.** Lone Star's minors precede
+   the major of the same cycle by ~37 minutes (IQR 28–44, n=107); chained as
+   eruptions they shatter a 186-minute cycle into 37/150-minute phantoms.
+   They are excluded from the interval chain (`cycle_events` CTE) — the same
+   reasoning that keeps Beehive's Indicator out of Beehive's chain, applied
+   to a flag instead of a name.
+
+2. **The p25 anchor assumes singles are ≥25% of local gaps.** Backcountry
+   logging makes singles the *minority* (~31% recently, fewer before), so the
+   p25 sat on a harmonic and the refined median self-validated a 1270-minute
+   "cycle". `SPARSE_SINGLES_GEYSERS` anchors at the local **p10**, still
+   safely above duplicate noise, which the 60-second dedupe and the 0.5×
+   floor already handle.
+
+3. **The second-mode ratio guard assumes harmonics live at 2–3×.** With half
+   the eruptions unlogged, the local p75 sits in a *smear* of 4–12×
+   missed-day multiples that sails past the 3.5× guard — so for
+   sparse-singles geysers the second-mode band stays off entirely: where
+   singles are the minority, there is no trustworthy long mode by
+   construction.
+
+Result: 686 valid intervals, median 180 min, log-sd 0.133 — against a
+pre-fix "valid" set with median 1270 and log-sd 1.35. Every other geyser's
+rows were verified unchanged by rules 2 and 3 (they key on the geyser name),
+and rule 1 removed exactly the 730 Lone Star minor-entry rows.
 
 ### A trap when comparing filter generations
 

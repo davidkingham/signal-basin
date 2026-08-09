@@ -182,6 +182,25 @@ def _build() -> None:
     rows += _rows("Lion", ep_lion[ini_arr], next_id, ini="1")
     next_id += int(ini_arr.sum()) + 10
 
+    # Lone Star: a ~186-minute cycle whose MINORS are precursors (~37 min
+    # before the major of the same cycle) rather than cycle events -- the
+    # ingest chain must exclude them or the intervals collapse into 37/150
+    # phantom modes. The last eruption sits 20 hours back, so the serving
+    # path's default state is the PLANNING card; sparse-singles behaviour is
+    # exercised by dropping half the majors.
+    n = 700
+    ivs = _rng.lognormal(np.log(186.0), 0.13, n) * 60.0
+    maj = END_EPOCH - 20 * 3600 - np.cumsum(ivs)[::-1]
+    keep = _rng.random(n) > 0.5
+    keep[-60:] = _rng.random(60) > 0.3  # recent era better-logged, like reality
+    maj_kept = maj[keep].astype(np.int64)
+    rows += _rows("Lone Star", maj_kept, next_id, maj="1")
+    next_id += n + 10
+    has_minor = _rng.random(len(maj_kept)) < 0.35
+    minors = (maj_kept[has_minor] - _rng.normal(37, 6, has_minor.sum()) * 60).astype(np.int64)
+    rows += _rows("Lone Star", minors, next_id, **{"min": "1"})
+    next_id += len(minors) + 10
+
     con.executemany(
         f"INSERT INTO eruptions_raw VALUES ({', '.join(['?'] * len(RAW_COLUMNS))})", rows
     )

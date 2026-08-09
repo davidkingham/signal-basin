@@ -53,6 +53,14 @@ INTERVAL_MAX_MULT = 1.75
 # ratio is ~7. Without this, the filter deleted ALL 7,410 of Lion's series
 # gaps since 2015 -- the mirror image of the Castle post-minor deletion.
 SECOND_MODE_RATIO = 3.5
+# The p25 anchor assumes true single intervals are at least a quarter of local
+# gaps. Backcountry logging breaks that: Lone Star's singles are ~31% of gaps
+# in the well-logged recent years and fewer before, so the 25th percentile
+# sits ON a harmonic and the median then self-validates it (valid median came
+# out 1270 min against a true 186-minute cycle). For these geysers the anchor
+# drops to the 10th percentile -- still safely above duplicate-entry noise,
+# which the 60-second dedupe pass and the 0.5x floor already handle.
+SPARSE_SINGLES_GEYSERS = frozenset({"Lone Star"})
 # Rows a regime needs before it gets its own validity baseline. Below this the
 # geyser almost certainly has no real minor mode, just a few stray flags.
 MIN_REGIME_ROWS = 200
@@ -294,14 +302,27 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
     """
     print("Building `intervals` table ...")
     con.execute("DROP TABLE IF EXISTS intervals")
+    sparse_singles = ", ".join(f"'{g}'" for g in sorted(SPARSE_SINGLES_GEYSERS))
     con.execute(
         f"""
         CREATE TABLE intervals AS
-        WITH deduped AS (
+        WITH cycle_events AS (
+            -- Lone Star's minors are PRECURSORS, not cycle events: a minor
+            -- precedes the major of the same cycle by ~37 min (IQR 28-44,
+            -- n=107 over 3y). Chaining them as eruptions injects ~37 and
+            -- ~150-minute phantom intervals into a 186-minute cycle and put
+            -- its log-sd at 1.5; the major-only chain is log-sd 0.124. The
+            -- same reasoning already keeps Beehive's Indicator out of
+            -- Beehive's chain -- there it is a separate geyser name, here it
+            -- is a flag on the same name.
+            SELECT * FROM eruptions
+            WHERE NOT (geyser = 'Lone Star' AND minor)
+        ),
+        deduped AS (
             -- collapse multiple observers logging the same eruption
             SELECT *,
                    LAG(epoch) OVER (PARTITION BY geyser ORDER BY epoch) AS prev_epoch_all
-            FROM eruptions
+            FROM cycle_events
         ),
         singles AS (
             SELECT * FROM deduped
@@ -418,12 +439,19 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
                    quantile_cont(interval_min, 0.75) OVER (
                        PARTITION BY geyser ORDER BY epoch
                        ROWS BETWEEN 400 PRECEDING AND 400 FOLLOWING
-                   ) AS base_hi_pooled
+                   ) AS base_hi_pooled,
+                   -- Sparse-singles anchor; see SPARSE_SINGLES_GEYSERS.
+                   quantile_cont(interval_min, 0.10) OVER (
+                       PARTITION BY geyser ORDER BY epoch
+                       ROWS BETWEEN 400 PRECEDING AND 400 FOLLOWING
+                   ) AS base0_p10
             FROM regime_sized
         ),
         base_pick AS (
             SELECT *,
-                   CASE WHEN regime_n >= {MIN_REGIME_ROWS}
+                   CASE WHEN geyser IN ({sparse_singles})
+                        THEN base0_p10
+                        WHEN regime_n >= {MIN_REGIME_ROWS}
                         THEN base0_regime ELSE base0_pooled END AS base0
             FROM base_anchor
         ),
@@ -489,9 +517,14 @@ def _build_intervals(con: duckdb.DuckDBPyConnection) -> None:
               AND r.interval_min <= {INTERVAL_MAX_MULT} * r.med_interval)
              -- Second-mode band: a gap near the LONG local mode of a genuinely
              -- bimodal geyser is a real interval, not a missed eruption. The
-             -- ratio guard keeps this branch inert everywhere harmonics could
-             -- masquerade as a mode; see SECOND_MODE_RATIO.
-             OR (r.med_interval IS NOT NULL AND r.med_long IS NOT NULL
+             -- ratio guard keeps this branch inert everywhere 2x/3x harmonics
+             -- could masquerade as a mode (see SECOND_MODE_RATIO) -- but a
+             -- sparse-singles geyser defeats the guard differently: its p75
+             -- sits in the SMEAR of 4x-12x missed-day multiples, which is not
+             -- a mode at all. Where singles are the minority, there is no
+             -- trustworthy long mode by construction, so the band stays off.
+             OR (r.geyser NOT IN ({sparse_singles})
+                 AND r.med_interval IS NOT NULL AND r.med_long IS NOT NULL
                  AND r.med_long >= {SECOND_MODE_RATIO} * r.med_interval
                  AND r.interval_min >= {INTERVAL_MIN_MULT} * r.med_long
                  AND r.interval_min <= {INTERVAL_MAX_MULT} * r.med_long)) AS is_valid

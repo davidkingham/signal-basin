@@ -22,6 +22,11 @@ Regenerate with `uv run geyser-ai backtest`; the full table lives in
 | Fountain | `adaptive_lognormal` | 35.2 | 48.4 | 52% | 87% |
 | Lion | `series_conditional` | 119.4 | 187.6 | 61% | 89% |
 | Artemisia | `best_parametric` | 174.9 | 240.3 | 53% | 86% |
+| Lone Star* | `best_parametric` | 14.9 | 20.1 | 60% | 94% |
+
+\* Lone Star serves a live prediction only when its anchor is fresh enough to
+carry phase (~7% of summer-daytime moments); otherwise a planning card that
+makes no clock-time claim. Its numbers are for exactly that live window.
 
 ## The single most important result
 
@@ -83,9 +88,26 @@ latency of 2.7 h eating the one useful cycle, a phase-bearing anchor exists
 **7% of summer-daytime moments**. The useful product is therefore a
 *planning* answer — interval stats, worst-case wait, and the decision rule
 "a trailside-logbook time from the last ~3 h puts the next eruption at
-+164 min ± 45; older times carry nothing" — not a countdown. Unbuilt as of
-this writing. If Lone Star ever gets an electronic logger, latency goes to
-zero and it graduates to a live card overnight.
++164 min ± 45; older times carry nothing" — not a countdown.
+
+**Built 2026-08-09 as the eleventh geyser, in a new serving mode.** Three
+data rules first: Lone Star's minors are *precursors* (median 37 min before
+the major, IQR 28–44, n=107) and are excluded from the interval chain; the
+baseline anchors at the local **p10** because singles are a minority of gaps
+(the p25 anchor sat on a harmonic and self-validated a 1270-minute
+"median"); and the second-mode band stays off (a sparse-singles geyser's
+apparent long mode is a smear of 4–12× missed-day multiples, not a mode).
+Result: 686 valid intervals, median 180, log-sd **0.133** — the true cycle.
+
+Serving contract (`PHASE_LIMITED_GEYSERS` + `PHASE_WINDOW_CYCLES = 2.5`):
+a live prediction only while the anchor is under ~2.5 cycles old; otherwise
+a **planning card** — interval stats, worst-case wait, the logbook rule —
+that makes no clock-time claim, and the ledger logs nothing for it, because
+scoring it would score a claim never made. Walk-forward on the live-window
+case (72 evaluations): **CRPS 14.9, MAE 20 min** — when the card does go
+live, it is the third-most-accurate geyser served. If Lone Star ever gets
+an electronic logger, latency goes to zero and the card is simply live all
+the time.
 
 ## Lion, the ninth geyser (added 2026-08-09)
 

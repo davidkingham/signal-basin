@@ -530,11 +530,16 @@ class TestScoreboardNeverBreaksPredictions:
 class TestOurPredictionsAreLogged:
     def test_a_full_run_records_every_geyser_once(self):
         import geyser_ai.service as svc
+        from geyser_ai.config import PHASE_LIMITED_GEYSERS
 
         svc.get_predictions(do_sync=False, density_points=16)
         led = ledger_mod.get_ledger()
         ours = [p for p in led.open.values() if p.source == "geyser_ai"]
-        assert {p.geyser for p in ours} == set(svc.TARGET_GEYSERS)
+        # Phase-limited geysers in planning mode make no clock-time claim, so
+        # they are deliberately absent -- the fixture's Lone Star anchor is 20h
+        # old, well past its phase window.
+        expected = set(svc.TARGET_GEYSERS) - PHASE_LIMITED_GEYSERS
+        assert {p.geyser for p in ours} == expected
         assert all(p.window_open_epoch and p.inner_open_epoch for p in ours)
 
     def test_recomputing_a_steady_forecast_does_not_grow_the_ledger(self):

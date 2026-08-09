@@ -408,6 +408,10 @@ def _our_logged_predictions(payload: dict[str, Any]) -> list[LoggedPrediction]:
     for pred in payload.get("predictions") or []:
         if "error" in pred or not pred.get("predicted_utc"):
             continue
+        # A planning-mode card makes no claim about a clock time, so there is
+        # nothing to hold it to. Scoring it would score a claim never made.
+        if pred.get("display_mode") == "planning":
+            continue
         try:
             predicted = int(pd.Timestamp(pred["predicted_utc"]).timestamp())
             w90 = [int(pd.Timestamp(t).timestamp()) for t in pred["window_90_utc"]]

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from .backtest import load_intervals
-from .config import DB_PATH, TARGET_GEYSERS
+from .config import DB_PATH, PHASE_LIMITED_GEYSERS, PHASE_WINDOW_CYCLES, TARGET_GEYSERS
 from .models import (
     MINOR_MODE_GEYSERS,
     SERIES_GEYSERS,
@@ -270,6 +270,17 @@ def predict_geyser(
         "naive_interval_50_min": [round(naive50[0], 1), round(naive50[1], 1)],
         "naive_interval_90_min": [round(naive90[0], 1), round(naive90[1], 1)],
     }
+    # Phase-limited geysers (backcountry Lone Star): the cycle forgets its
+    # phase in ~2-3 intervals, and reports arrive with a median latency of one
+    # full cycle, so a prediction from a stale anchor is "sometime in the next
+    # cycle" dressed up as a clock time. The caller gets an explicit mode flag
+    # instead of a number that pretends to more than the physics allows; the
+    # dashboard renders a planning card, and the ledger logs nothing.
+    if geyser in PHASE_LIMITED_GEYSERS:
+        phase_window = PHASE_WINDOW_CYCLES * naive_med
+        result["phase_window_min"] = round(phase_window, 1)
+        result["display_mode"] = "planning" if age_min > phase_window else "live"
+
     if include_dist:
         # Non-serialisable; callers that ask for it must pop it before JSON.
         result["_prediction"] = rpred

@@ -44,6 +44,7 @@ GeyserName = Literal[
     "Fountain",
     "Lion",
     "Artemisia",
+    "Lone Star",
 ]
 
 

@@ -119,6 +119,11 @@ is better):
 | Fountain | `adaptive_lognormal` | 35.2 | 48.4 | 52% | 87% |
 | Lion | `series_conditional` | 119.4 | 187.6 | 61% | 89% |
 | Artemisia | `best_parametric` | 174.9 | 240.3 | 53% | 86% |
+| Lone Star* | `best_parametric` | 14.9 | 20.1 | 60% | 94% |
+
+\* Backcountry: a live prediction appears only when a report fresh enough to
+carry phase exists (~7% of summer-daytime moments); otherwise the dashboard
+shows a planning card with interval statistics and the trailside-logbook rule.
 
 **Each geyser is served by the model in that table**, not by a single global
 default — see `models.BEST_MODEL_BY_GEYSER`. That distinction is only load-bearing
@@ -342,7 +347,7 @@ single-page dashboard. Interactive API docs are at `/docs`.
 | Endpoint | What it returns |
 |---|---|
 | `GET /` | The dashboard |
-| `GET /api/predictions?hours=12&points=96` | All ten geysers, sorted soonest first: median, 50%/90% windows, expected missed eruptions, data age, and a probability-density curve for charting |
+| `GET /api/predictions?hours=12&points=96` | All eleven geysers, sorted soonest first: median, 50%/90% windows, expected missed eruptions, data age, and a probability-density curve for charting |
 | `GET /api/predictions/{geyser}?points=240` | One geyser, denser curve |
 | `GET /api/eruptions/recent?hours=24` | Recently logged eruptions (`geyser=` and `targets_only=` filters) |
 | `GET /api/stats?geyser=Grand` | Interval statistics per geyser |

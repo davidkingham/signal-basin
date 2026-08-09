@@ -176,6 +176,11 @@ button.theme:focus-visible{outline:2px solid var(--pool-500);outline-offset:2px}
 }
 .chip.warn{border-color:var(--amber);color:var(--amber)}
 .chip.stale{border-color:var(--mat);color:var(--mat)}
+.card.planning{opacity:.88}
+.planning-tag{
+  font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);align-self:center;
+}
 
 /* "why this time?" — the prediction's own working, shown on demand */
 details.why{margin-top:10px;border-top:1px dashed var(--line);padding-top:7px}
@@ -466,7 +471,7 @@ const HOURS = 12;            // future span of the shared axis
 const PAST_H = 1;            // shown before "now", so the marker sits inside
 const SPAN = PAST_H + HOURS; // total hours across the ribbon
 const REFRESH_MS = 5 * 60 * 1000;
-const TARGETS = new Set(["Old Faithful","Grand","Daisy","Riverside","Castle","Great Fountain","Beehive","Fountain","Lion","Artemisia"]);
+const TARGETS = new Set(["Old Faithful","Grand","Daisy","Riverside","Castle","Great Fountain","Beehive","Fountain","Lion","Artemisia","Lone Star"]);
 
 let lastData = null;
 
@@ -716,6 +721,32 @@ function card(p){
   if (p.error){
     el.innerHTML = `<div class="row1"><h3 class="name">${p.geyser}</h3></div>
       <div class="at">No prediction — ${p.error}</div>`;
+    return el;
+  }
+
+  // Phase-limited geysers get a PLANNING card whenever the anchor is too old
+  // to carry phase. No countdown, no ribbon: the honest content is the
+  // interval statistics and the decision rule a hiker can actually use.
+  if (p.display_mode === "planning"){
+    el.classList.add("planning");
+    const med = p.naive_median_interval_min, n90 = p.naive_interval_90_min;
+    el.innerHTML = `
+      <div class="row1">
+        <h3 class="name">${p.geyser}</h3>
+        <div class="until planning-tag">no recent report</div>
+      </div>
+      <div class="at">Erupts about every <b>${fmtDur(med)}</b> (90% of intervals: ${fmtDur(n90[0])}–${fmtDur(n90[1])}).
+        Worst-case wait after arriving is about one interval.</div>
+      <div class="at">Saw one, or the trailside logbook shows an eruption in the last
+        <b>${fmtDur(p.phase_window_min)}</b>? The next is ~${fmtDur(med)} after it — a live
+        prediction appears here whenever a report that fresh reaches GeyserTimes.</div>`;
+    const chips = document.createElement("div");
+    chips.className = "chips";
+    const c = document.createElement("span");
+    c.className = "chip"; c.textContent = "backcountry · planning info";
+    chips.appendChild(c);
+    el.appendChild(chips);
+    el.appendChild(whyPanel(p));
     return el;
   }
 

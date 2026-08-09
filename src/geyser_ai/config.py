@@ -34,4 +34,16 @@ TARGET_GEYSERS: tuple[str, ...] = (
     "Fountain",
     "Lion",
     "Artemisia",
+    "Lone Star",
 )
+
+# Geysers whose anchor loses phase information faster than reports arrive.
+# Lone Star: backcountry, median entry latency 2.7 h against a 186-minute
+# cycle whose phase decoheres in ~2-3 intervals (per-cycle jitter ~23 min,
+# compounding as a random walk). A prediction from a stale anchor is
+# "sometime in the next cycle" dressed up as a time, so the dashboard shows
+# a PLANNING card instead unless the anchor is genuinely fresh.
+PHASE_LIMITED_GEYSERS: frozenset[str] = frozenset({"Lone Star"})
+# Show a live prediction while the anchor is under this many median cycles
+# old; beyond it the 90% band exceeds what knowing nothing would give.
+PHASE_WINDOW_CYCLES = 2.5
