@@ -31,4 +31,5 @@ TARGET_GEYSERS: tuple[str, ...] = (
     "Castle",
     "Great Fountain",
     "Beehive",
+    "Fountain",
 )

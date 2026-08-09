@@ -12,13 +12,14 @@ Regenerate with `uv run geyser-ai backtest`; the full table lives in
 
 | Geyser | Best model | CRPS | MAE | 50% cov | 90% cov |
 |---|---|---:|---:|---:|---:|
-| Old Faithful | `minor_conditional` | 4.5 | 6.1 | 59% | 93% |
-| Grand | `adaptive_lognormal` | 38.8 | 54.2 | 48% | 91% |
-| Daisy | `adaptive_lognormal` | 3.1 | 4.3 | 52% | 89% |
+| Old Faithful | `minor_conditional` | 4.7 | 6.4 | 58% | 93% |
+| Grand | `adaptive_lognormal` | 38.9 | 54.4 | 47% | 91% |
+| Daisy | `adaptive_lognormal` | 3.1 | 4.3 | 51% | 88% |
 | Riverside | `adaptive_lognormal` | 12.8 | 17.5 | 53% | 91% |
-| Castle | `minor_conditional` | 77.2 | 101.2 | 61% | 87% |
+| Castle | `minor_conditional` | 77.6 | 101.6 | 61% | 87% |
 | Great Fountain | `lognormal` | 45.6 | 62.9 | 55% | 91% |
-| Beehive | `rolling_normal` | 120.4 | 166.9 | 52% | 87% |
+| Beehive | `rolling_normal` | 119.8 | 166.1 | 52% | 87% |
+| Fountain | `adaptive_lognormal` | 35.2 | 48.4 | 52% | 87% |
 
 ## The single most important result
 
@@ -29,6 +30,37 @@ and a further 30% on Castle from the per-regime fix. See
 [data-quality.md](data-quality.md).
 
 If you have a day to spend improving predictions, spend it on the data.
+
+## Fountain, the eighth geyser (added 2026-08-09)
+
+Selected by a sweep of all 491 logged geysers for interval tightness and
+logging density, calibrated against the existing seven (log-sd of the
+single-interval mode: Daisy 0.057 best, Beehive 0.206 worst). Fountain came in
+at **log-sd 0.207 on a 305-minute median** — statistically the same tier as
+Castle (0.203) and Beehive (0.206) — with 916 entries over two years, a
+unimodal interval distribution, and no drift (the most recent ~120 intervals
+fit log-sd 0.201). Neither the NPS nor Geysers.net predicts it, so this is
+coverage nobody else provides rather than a head-to-head.
+
+Two caveats, recorded up front:
+
+- **Honest coverage is the worst in the set**: 45.9% of raw gaps are rejected
+  by the validity filter (overnight logging is sparse at Fountain Paint Pots)
+  and the honest 90% band catches only 47.8%. A gazer scoring us against every
+  raw interval will see misses at nearly Great Fountain rates (51.7%).
+- **Morning is not modelled.** When Morning is active the two geysers interact
+  and Fountain's intervals shift; the current models will simply see wider
+  scatter. Nobody should be surprised if a future Morning active phase makes
+  Fountain's live numbers sag until that conditioning is added.
+
+The runner-up candidate from the same sweep was **Lion** (in-series log-sd
+0.133 at an 83-minute median, tighter than anything served except Daisy and
+Riverside) — but it needs a series-aware conditional model on the `initial`
+flag (after an initial, 82% of next eruptions arrive within 120 min; after a
+non-initial it is a 40/60 mixture of series-continue at ~80 min and series-end
+at 7.8–14.7 h). Not added yet. Ruled out with numbers: White Dome (0.297),
+Aurum (0.319), Sawmill (0.306), Grotto (0.298), Lone Star (regular but 176
+entries in two years — backcountry logging is too sparse to anchor on).
 
 ## What production serves, and why
 
@@ -46,14 +78,14 @@ two geysers:
 
 | | `best_parametric` | `minor_conditional` | change |
 |---|---:|---:|---:|
-| Old Faithful | 8.78 | **4.51** | −49% |
-| Castle | 172.50 | **77.23** | −55% |
+| Old Faithful | 8.9 | **4.7** | −47% |
+| Castle | 173.0 | **77.6** | −55% |
 
-The other five keep the default deliberately. Their walk-forward winners beat
-`best_parametric` by **0.2–4.8%** (Riverside 12.77 vs 12.81; Great Fountain 45.57
-vs 45.66; Daisy 3.13 vs 3.22; Grand 38.77 vs 39.93; Beehive 120.40 vs 126.44).
-That is inside the noise, and pinning a production choice on it would be
-overfitting the leaderboard rather than improving the forecast.
+The other six keep the default deliberately. Their walk-forward winners beat
+`best_parametric` by **0.2–5.5%** (Riverside 12.8 vs 12.8; Great Fountain 45.6
+vs 45.7; Daisy 3.1 vs 3.2; Grand 38.9 vs 40.0; Beehive 119.8 vs 126.3; Fountain
+35.2 vs 37.3). That is inside the noise, and pinning a production choice on it
+would be overfitting the leaderboard rather than improving the forecast.
 
 **If you regenerate the backtest, update this map — but only where the margin is
 decisive.**
@@ -124,7 +156,7 @@ failed.
 ### The covariate survival model does not earn its complexity
 
 `weibull_aft` (lifelines Weibull AFT with previous interval, hour of day, day of
-year, entry flags) ranks in the **bottom half on all seven geysers**. Simple
+year, entry flags) ranks in the **bottom half on all eight geysers**. Simple
 rolling lognormal/Weibull fits beat it nearly everywhere, and a plain rolling
 mean ± window — essentially what the existing community dashboard shows — wins
 outright on Beehive.

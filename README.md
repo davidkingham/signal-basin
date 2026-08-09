@@ -108,13 +108,14 @@ is better):
 
 | Geyser | Best model | CRPS | MAE | 50% cov | 90% cov |
 |---|---|---:|---:|---:|---:|
-| Old Faithful | `minor_conditional` | 4.5 | 6.1 | 59% | 93% |
-| Grand | `adaptive_lognormal` | 38.8 | 54.2 | 48% | 91% |
-| Daisy | `adaptive_lognormal` | 3.1 | 4.3 | 52% | 89% |
+| Old Faithful | `minor_conditional` | 4.7 | 6.4 | 58% | 93% |
+| Grand | `adaptive_lognormal` | 38.9 | 54.4 | 47% | 91% |
+| Daisy | `adaptive_lognormal` | 3.1 | 4.3 | 51% | 88% |
 | Riverside | `adaptive_lognormal` | 12.8 | 17.5 | 53% | 91% |
-| Castle | `minor_conditional` | 77.2 | 101.2 | 61% | 87% |
+| Castle | `minor_conditional` | 77.6 | 101.6 | 61% | 87% |
 | Great Fountain | `lognormal` | 45.6 | 62.9 | 55% | 91% |
-| Beehive | `rolling_normal` | 120.4 | 166.9 | 52% | 87% |
+| Beehive | `rolling_normal` | 119.8 | 166.1 | 52% | 87% |
+| Fountain | `adaptive_lognormal` | 35.2 | 48.4 | 52% | 87% |
 
 **Each geyser is served by the model in that table**, not by a single global
 default — see `models.BEST_MODEL_BY_GEYSER`. That distinction is only load-bearing
@@ -329,7 +330,7 @@ single-page dashboard. Interactive API docs are at `/docs`.
 | Endpoint | What it returns |
 |---|---|
 | `GET /` | The dashboard |
-| `GET /api/predictions?hours=12&points=96` | All seven geysers, sorted soonest first: median, 50%/90% windows, expected missed eruptions, data age, and a probability-density curve for charting |
+| `GET /api/predictions?hours=12&points=96` | All eight geysers, sorted soonest first: median, 50%/90% windows, expected missed eruptions, data age, and a probability-density curve for charting |
 | `GET /api/predictions/{geyser}?points=240` | One geyser, denser curve |
 | `GET /api/eruptions/recent?hours=24` | Recently logged eruptions (`geyser=` and `targets_only=` filters) |
 | `GET /api/stats?geyser=Grand` | Interval statistics per geyser |

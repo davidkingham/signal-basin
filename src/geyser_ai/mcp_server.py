@@ -34,7 +34,7 @@ mcp = MCPServer(
 )
 
 GeyserName = Literal[
-    "Old Faithful", "Grand", "Daisy", "Riverside", "Castle", "Great Fountain", "Beehive"
+    "Old Faithful", "Grand", "Daisy", "Riverside", "Castle", "Great Fountain", "Beehive", "Fountain"
 ]
 
 
