@@ -661,16 +661,25 @@ class TailMixture:
         return np.interp(q, self.cdf(grid), grid)
 
 
-def fit_tail_mixture(intervals: np.ndarray, window: int = 100, w_wide: float = 0.15):
-    """Lognormal on the recent window, widened by one fitted on the long history."""
+def fit_tail_mixture(intervals: np.ndarray, window: int = 100, w_wide: float = 0.15, narrow=None):
+    """Lognormal on the recent window, widened by one fitted on the long history.
+
+    `narrow` optionally supplies an already-fitted distribution to widen instead
+    of fitting one here -- this is how a *conditional* model's branch fit keeps
+    its centre while still being widened. The wide component is always centred
+    on the narrow one's median, so widening never moves the median; substituting
+    an unconditionally-fitted narrow component for a conditional one is exactly
+    the bug documented in docs/findings/live-scoreboard.md.
+    """
     x = np.asarray(intervals, dtype=float)
     x = x[np.isfinite(x) & (x > 0)]
     if len(x) < 12:
-        return None
+        return narrow
     recent = np.log(x[-window:])
-    narrow = stats.lognorm(
-        s=max(float(np.std(recent, ddof=1)), 1e-3), scale=np.exp(float(np.mean(recent)))
-    )
+    if narrow is None:
+        narrow = stats.lognorm(
+            s=max(float(np.std(recent, ddof=1)), 1e-3), scale=np.exp(float(np.mean(recent)))
+        )
     if len(x) < window * 3:
         return narrow
     long = np.log(x[-2000:])
@@ -681,7 +690,7 @@ def fit_tail_mixture(intervals: np.ndarray, window: int = 100, w_wide: float = 0
     # prefer "we missed one". 0.20 in log space puts the wide component's 95th
     # percentile near 1.4x the median, inside the range the filter still accepts.
     wide_sd = max(float(np.std(long, ddof=1)), float(np.std(recent, ddof=1)) * 2.0, 0.20)
-    wide = stats.lognorm(s=wide_sd, scale=np.exp(float(np.mean(recent))))
+    wide = stats.lognorm(s=wide_sd, scale=float(narrow.ppf(0.5)))
     return TailMixture(narrow, wide, w_wide)
 
 
@@ -691,6 +700,7 @@ def renewal_forecast(
     p_obs: float,
     n_sims: int = 40_000,
     seed: int = 0,
+    rest_dist: stats.rv_continuous | None = None,
 ) -> tuple[SamplePrediction, float]:
     """Distribution of the next eruption given nothing has been LOGGED for `age_min`.
 
@@ -719,16 +729,26 @@ def renewal_forecast(
     eruption has been missed -- i.e. that we are still inside the current cycle.
     That last number is what a UI needs to say "overdue, expected any minute"
     instead of silently swapping to a next-cycle time.
+
+    `dist` describes the interval from the ANCHOR eruption, so it may carry the
+    anchor's covariates (e.g. a post-minor branch fit). Intervals after the
+    first simulated eruption follow an eruption whose branch is unknown, so they
+    are drawn from `rest_dist` -- the unconditional distribution -- when given.
     """
     rng = np.random.default_rng(seed)
+    if rest_dist is None:
+        rest_dist = dist
     # Cap p_obs: at exactly 1.0 every stale-data path gets zero weight and the
     # forecast degenerates. 0.995 keeps survival dominant without collapsing.
     p_obs = float(min(max(p_obs, 0.05), 0.995))
 
-    # Draw generously; paths need enough intervals to cross `age_min`.
-    med = float(dist.ppf(0.5))
+    # Draw generously; paths need enough intervals to cross `age_min`. Chain
+    # length is governed by the marginal, not the (possibly short) first branch.
+    med = float(rest_dist.ppf(0.5))
     max_steps = int(np.clip(age_min / max(med, 1e-6) + 6, 3, 200))
-    draws = dist.rvs(size=(n_sims, max_steps), random_state=rng)
+    draws = rest_dist.rvs(size=(n_sims, max_steps), random_state=rng)
+    if rest_dist is not dist:
+        draws[:, 0] = dist.rvs(size=n_sims, random_state=rng)
     draws = np.clip(np.nan_to_num(draws, nan=med), 1e-6, None)
 
     cum = np.cumsum(draws, axis=1)

@@ -151,9 +151,19 @@ def predict_geyser(
     # missed. A single per-geyser constant made the forecast jump a whole cycle
     # the moment a closely-watched geyser passed its median.
     p_obs, p_obs_detail = observation_completeness_at(geyser, db_path=db_path)
-    # Widen the sharp rolling fit so being late is surprising, not impossible.
-    base_dist = fit_tail_mixture(hist["interval_min"].to_numpy()) or pred.dist
-    rpred, exp_missed, p_current = renewal_forecast(base_dist, max(age_min, 0.0), p_obs)
+    # Widen the model's fit so being late is surprising, not impossible -- but
+    # keep it ANCHORED on that fit. An earlier version substituted the
+    # unconditional marginal here, which silently discarded the conditional
+    # models' branch selection: Old Faithful served a constant ~93 min against
+    # a bimodal 70/102 reality. See docs/findings/live-scoreboard.md.
+    intervals = hist["interval_min"].to_numpy()
+    marginal = fit_tail_mixture(intervals)
+    base_dist = fit_tail_mixture(intervals, narrow=pred.dist) or pred.dist
+    # Past the first simulated eruption the branch is unknown again, so chained
+    # missed-eruption draws revert to the marginal.
+    rpred, exp_missed, p_current = renewal_forecast(
+        base_dist, max(age_min, 0.0), p_obs, rest_dist=marginal or base_dist
+    )
     med = rpred.median()
     lo50, hi50 = rpred.interval(0.50)
     lo90, hi90 = rpred.interval(0.90)

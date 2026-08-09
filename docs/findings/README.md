@@ -21,6 +21,7 @@ live through it. Two rules the whole set follows:
 | [model-results.md](model-results.md) | Every model tried, what won, what lost, why production serves what it serves, and the leakage bug that made a model look good |
 | [external-forcings.md](external-forcings.md) | Whether weather, tides, rainfall, earthquakes and hydrology move eruption intervals. Mostly: no. Literature synthesis plus our own in-database interaction work |
 | [engineering-notes.md](engineering-notes.md) | Deploying a Python/DuckDB/SciPy stack on Cloudflare Containers, and the things that cost hours |
+| [live-scoreboard.md](live-scoreboard.md) | First live comparison against NPS and Geysers.net, and the serving-path bug it caught: production discarded the conditional model and served the unconditional marginal on Old Faithful and Castle |
 
 ## The one-paragraph summary
 

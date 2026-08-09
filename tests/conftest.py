@@ -134,6 +134,28 @@ def _build() -> None:
             rows += _rows("Turban", tur.astype(np.int64), next_id)
             next_id += len(tur) + 10
 
+    # A geyser with a true minor mode, shaped like the real Old Faithful: ~30%
+    # of eruptions are minors, and the interval FOLLOWING a minor comes from a
+    # different, shorter distribution (70 vs 102 min medians). The final
+    # eruption is forced to be a minor so serving-path tests can assert that
+    # the post-minor branch is what actually gets served -- a path that
+    # discards the branch lands near the pooled ~92, over 20 minutes away.
+    # No observation gaps: the point is the branch structure, not the filter.
+    n = 1200
+    is_minor = _rng.random(n) < 0.30
+    is_minor[-1] = True
+    gap_min = np.where(
+        is_minor,
+        _rng.lognormal(np.log(70.0), 0.06, n),
+        _rng.lognormal(np.log(102.0), 0.06, n),
+    )
+    ep = np.concatenate([[0.0], np.cumsum(gap_min[:-1] * 60.0)])
+    ep = (ep - ep[-1] + END_EPOCH).astype(np.int64)
+    rows += _rows("Plume", ep[~is_minor], next_id)
+    next_id += int((~is_minor).sum()) + 10
+    rows += _rows("Plume", ep[is_minor], next_id, **{"min": "1"})
+    next_id += int(is_minor.sum()) + 10
+
     con.executemany(
         f"INSERT INTO eruptions_raw VALUES ({', '.join(['?'] * len(RAW_COLUMNS))})", rows
     )
