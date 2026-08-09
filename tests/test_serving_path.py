@@ -36,15 +36,14 @@ class TestServedPredictionKeepsTheBranch:
         assert r is not None
         # Fresh anchor: the renewal forecast must reduce to the model's own
         # (naive) answer, not to the marginal's.
-        assert r["median_interval_min"] == pytest.approx(
-            r["naive_median_interval_min"], abs=6.0
-        ), "served median drifted from the model's answer on fresh data"
+        assert r["median_interval_min"] == pytest.approx(r["naive_median_interval_min"], abs=6.0), (
+            "served median drifted from the model's answer on fresh data"
+        )
         # The anchor is a minor, so both must sit on the short branch. The
         # pooled marginal median is ~92; anything near it means the branch
         # selection was discarded on the way out.
         assert r["median_interval_min"] < 85.0, (
-            f"served {r['median_interval_min']:.1f} min: post-minor branch (~70) "
-            f"was not served"
+            f"served {r['median_interval_min']:.1f} min: post-minor branch (~70) was not served"
         )
 
     def test_widening_keeps_the_conditional_centre(self):
