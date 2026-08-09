@@ -211,6 +211,18 @@ the Old Faithful webcam, and an anchor inside its window 94% of the time.
 serves `best_parametric`. Honest 90% coverage 76.0%, better than most of
 the frontcountry set. Slow accumulation: ~12 scored eruptions a month.
 
+## Steamboat: a context card, deliberately not a prediction (2026-08-09)
+
+The most-asked-about geyser gets a card that names no time: days since the
+last major, the recent interval range (weeks to months, from GeyserTimes),
+and the plain statement that nobody can honestly predict it. Seismic
+detection via the Norris stations was investigated the same day and
+deliberately deferred — the calibrated single-station detector false-fires
+on wind and misses one in four eruptions; the full numbers and the
+two-station design that would work are in [seismic.md](seismic.md). The
+card sorts below planning cards and is never logged to the ledger: no
+claim, nothing to score.
+
 ## What production serves, and why
 
 `models.BEST_MODEL_BY_GEYSER`:

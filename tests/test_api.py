@@ -48,7 +48,11 @@ class TestHealth:
 class TestPredictions:
     def test_all_geysers_present_and_sorted(self):
         d = client.get("/api/predictions?hours=12&points=16").json()
-        preds = [p for p in d["predictions"] if "error" not in p]
+        preds = [
+            p
+            for p in d["predictions"]
+            if "error" not in p and p.get("display_mode") != "context"
+        ]
         assert len(preds) == len(TARGET_GEYSERS)
         # Soonest-first among live predictions; planning-mode cards name no
         # time, so they sit below every live prediction regardless of their
@@ -65,7 +69,7 @@ class TestPredictions:
     def test_explain_block_shape(self):
         """The "why this time?" panel renders these verbatim; they must exist."""
         for p in client.get("/api/predictions?points=16").json()["predictions"]:
-            if "error" in p:
+            if "error" in p or p.get("display_mode") == "context":
                 continue
             ex = p["explain"]
             assert {"entry_type"} <= set(ex["anchor"])
@@ -81,6 +85,8 @@ class TestPredictions:
 
     def test_windows_nested_and_ordered(self):
         for p in client.get("/api/predictions?points=16").json()["predictions"]:
+            if p.get("display_mode") == "context":
+                continue
             lo50, hi50 = p["interval_50_min"]
             lo90, hi90 = p["interval_90_min"]
             assert lo90 <= lo50 <= hi50 <= hi90

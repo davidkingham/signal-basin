@@ -199,9 +199,23 @@ def get_predictions(
 
     ok = [r for r in out if "error" not in r]
     bad = [r for r in out if "error" in r]
+    if geysers is None:
+        try:
+            ctx = _steamboat_context(db_path)
+            if ctx:
+                ok.append(ctx)
+        except Exception:  # the context card must never break the page
+            pass
     # Planning-mode cards make no clock-time claim, so "soonest first" does
-    # not apply to them -- they sit below every live prediction.
-    ok.sort(key=lambda r: (r.get("display_mode") == "planning", r["minutes_until"]))
+    # not apply to them -- they sit below every live prediction; context
+    # cards (Steamboat) sit below those.
+    _MODE_RANK = {"planning": 1, "context": 2}
+    ok.sort(
+        key=lambda r: (
+            _MODE_RANK.get(r.get("display_mode"), 0),
+            r.get("minutes_until") if r.get("minutes_until") is not None else float("inf"),
+        )
+    )
     payload = {
         "generated_utc": pd.Timestamp.now(tz="UTC").isoformat(),
         "park_time": pd.Timestamp.now(tz=PARK_TZ).strftime("%Y-%m-%d %H:%M %Z"),
@@ -220,6 +234,59 @@ def get_predictions(
             payload["scoreboard_error"] = f"{type(exc).__name__}: {exc}"
 
     return payload
+
+
+def _steamboat_context(db_path=DB_PATH) -> dict[str, Any] | None:
+    """The Steamboat card: context, explicitly not a prediction.
+
+    Steamboat is the geyser people ask about most and the one nobody can
+    honestly predict -- its current active phase runs weeks-to-months between
+    majors with no reliable precursor (and no, seismic detection is not ready:
+    see docs/findings/seismic.md for why the single-station detector cannot
+    yet be trusted). What CAN be said honestly: when it last went, and what
+    the recent intervals have looked like. Saying exactly that, and no more,
+    is the point.
+    """
+    con = duckdb.connect(str(db_path), read_only=True)
+    try:
+        has_recent = con.execute(
+            "SELECT count(*) FROM duckdb_tables() WHERE table_name = 'recent_eruptions'"
+        ).fetchone()[0]
+        recent_sql = (
+            "UNION ALL SELECT epoch FROM recent_eruptions WHERE geyser = 'Steamboat' AND major"
+            if has_recent
+            else ""
+        )
+        rows = con.execute(
+            f"""
+            WITH majors AS (
+                SELECT epoch FROM eruptions WHERE geyser = 'Steamboat' AND major
+                {recent_sql}
+            )
+            SELECT DISTINCT epoch FROM majors ORDER BY epoch DESC LIMIT 9
+            """
+        ).fetchall()
+    finally:
+        con.close()
+    if len(rows) < 2:
+        return None
+    epochs = [r[0] for r in rows]  # newest first
+    now = pd.Timestamp.now(tz="UTC")
+    last = pd.Timestamp(epochs[0], unit="s", tz="UTC")
+    gaps_days = [(a - b) / 86400.0 for a, b in zip(epochs[:-1], epochs[1:], strict=False)]
+    return {
+        "geyser": "Steamboat",
+        "display_mode": "context",
+        "last_eruption_utc": last.isoformat(),
+        "last_eruption_local": last.tz_convert(PARK_TZ).strftime("%Y-%m-%d %H:%M %Z"),
+        "days_since": round((now - last).total_seconds() / 86400.0, 1),
+        "recent_intervals_days": {
+            "n": len(gaps_days),
+            "min": round(min(gaps_days), 1),
+            "median": round(float(pd.Series(gaps_days).median()), 1),
+            "max": round(max(gaps_days), 1),
+        },
+    }
 
 
 def _sync_summary() -> dict[str, Any]:

@@ -19,6 +19,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "mcp>=1.2",
+    "simplemseed>=1.0.2",
 ]
 
 [project.scripts]

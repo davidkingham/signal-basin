@@ -724,6 +724,32 @@ function card(p){
     return el;
   }
 
+  // Steamboat gets a CONTEXT card: the geyser people ask about most and the
+  // one nobody can honestly predict. Days since, recent interval range, and
+  // an explicit statement that no one can call it -- that statement IS the
+  // product.
+  if (p.display_mode === "context"){
+    el.classList.add("planning");
+    const ri = p.recent_intervals_days || {};
+    el.innerHTML = `
+      <div class="row1">
+        <h3 class="name">${p.geyser}</h3>
+        <div class="until planning-tag">${Math.round(p.days_since)} days since</div>
+      </div>
+      <div class="at">Last major: <b>${(p.last_eruption_local||"").replace(/ [A-Z]+$/,"")}</b>.
+        The last ${ri.n} intervals ran ${Math.round(ri.min)}–${Math.round(ri.max)} days
+        (median ${Math.round(ri.median)}).</div>
+      <div class="at">Steamboat gives no reliable warning — nobody can honestly predict it,
+        so this card never will. It shows what is actually known instead.</div>`;
+    const chips = document.createElement("div");
+    chips.className = "chips";
+    const c = document.createElement("span");
+    c.className = "chip"; c.textContent = "world's tallest · context only";
+    chips.appendChild(c);
+    el.appendChild(chips);
+    return el;
+  }
+
   // Phase-limited geysers get a PLANNING card whenever the anchor is too old
   // to carry phase. No countdown, no ribbon: the honest content is the
   // interval statistics and the decision rule a hiker can actually use.

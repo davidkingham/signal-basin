@@ -218,6 +218,13 @@ def _build() -> None:
     rows += _rows("Till", afters, next_id, **{"min": "1"})
     next_id += len(afters) + 10
 
+    # Steamboat: ten majors, weeks-to-months apart, newest ~30 days back --
+    # enough for the context card's days-since and recent-interval numbers.
+    gaps_d = _rng.uniform(40, 90, 9)
+    sb = END_EPOCH - 30 * 86400 - np.concatenate([[0.0], np.cumsum(gaps_d)]) * 86400
+    rows += _rows("Steamboat", sb[::-1].astype(np.int64), next_id, maj="1")
+    next_id += len(sb) + 10
+
     con.executemany(
         f"INSERT INTO eruptions_raw VALUES ({', '.join(['?'] * len(RAW_COLUMNS))})", rows
     )

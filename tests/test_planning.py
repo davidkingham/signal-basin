@@ -109,10 +109,34 @@ class TestPlanningCardsSortLast:
         import geyser_ai.service as svc
 
         payload = svc.get_predictions(do_sync=False, density_points=16, record=False)
-        modes = [
-            p.get("display_mode") == "planning" for p in payload["predictions"] if "error" not in p
+        rank = {"planning": 1, "context": 2}
+        ranks = [
+            rank.get(p.get("display_mode"), 0)
+            for p in payload["predictions"]
+            if "error" not in p
         ]
-        # Once the first planning card appears, everything after must also be
-        # planning -- i.e. no live card below a planning card.
-        assert modes == sorted(modes), "a live prediction sorted below a planning card"
-        assert modes[-1], "the fixture's stale Lone Star must be last"
+        # live < planning < context; no card may sort above its class.
+        assert ranks == sorted(ranks), f"cards out of class order: {ranks}"
+        assert 1 in ranks, "the fixture's stale Lone Star must appear as planning"
+        assert ranks[-1] == 2, "the Steamboat context card must be last"
+
+
+class TestSteamboatContextCard:
+    def test_context_entry_present_and_last(self):
+        import geyser_ai.service as svc
+
+        payload = svc.get_predictions(do_sync=False, density_points=16, record=False)
+        preds = [p for p in payload["predictions"] if "error" not in p]
+        assert preds[-1]["geyser"] == "Steamboat", "context sorts below everything"
+        sb = preds[-1]
+        assert sb["display_mode"] == "context"
+        assert 25 < sb["days_since"] < 35
+        ri = sb["recent_intervals_days"]
+        assert ri["n"] >= 5 and 35 < ri["min"] <= ri["median"] <= ri["max"] < 95
+        assert "predicted_utc" not in sb, "a context card must never carry a time claim"
+
+    def test_context_is_never_scored(self):
+        from geyser_ai.service import _our_logged_predictions
+
+        payload = {"predictions": [{"geyser": "Steamboat", "display_mode": "context"}]}
+        assert _our_logged_predictions(payload) == []

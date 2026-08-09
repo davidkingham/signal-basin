@@ -48,7 +48,8 @@ class TestCalls:
     def test_predictions_returns_all_geysers(self):
         res = anyio.run(lambda: mcp.call_tool("get_predictions", {}))
         data = _payload(res)
-        assert len(data["predictions"]) == len(TARGET_GEYSERS)
+        # targets plus the Steamboat context card
+        assert len(data["predictions"]) == len(TARGET_GEYSERS) + 1
 
     def test_predictions_strips_density_by_default(self):
         data = _payload(anyio.run(lambda: mcp.call_tool("get_predictions", {"geyser": "Grand"})))

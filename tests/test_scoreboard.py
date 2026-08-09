@@ -515,7 +515,8 @@ class TestScoreboardNeverBreaksPredictions:
 
         monkeypatch.setattr(svc, "update_scoreboard", boom)
         d = svc.get_predictions(do_sync=False, density_points=16)
-        assert len(d["predictions"]) == len(svc.TARGET_GEYSERS)
+        # +1: the Steamboat context card rides along without being a target
+        assert len(d["predictions"]) == len(svc.TARGET_GEYSERS) + 1
         assert "ledger exploded" in d["scoreboard_error"]
 
     def test_a_single_geyser_request_does_not_log_a_new_forecast(self, monkeypatch):
@@ -541,7 +542,7 @@ class TestOurPredictionsAreLogged:
         expected = {
             p["geyser"]
             for p in payload["predictions"]
-            if "error" not in p and p.get("display_mode") != "planning"
+            if "error" not in p and p.get("display_mode") not in ("planning", "context")
         }
         assert "Till" in expected and "Lone Star" not in expected
         assert {p.geyser for p in ours} == expected
