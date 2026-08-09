@@ -50,8 +50,13 @@ class TestPredictions:
         d = client.get("/api/predictions?hours=12&points=16").json()
         preds = [p for p in d["predictions"] if "error" not in p]
         assert len(preds) == len(TARGET_GEYSERS)
-        mins = [p["minutes_until"] for p in preds]
-        assert mins == sorted(mins), "predictions must be soonest-first"
+        # Soonest-first among live predictions; planning-mode cards name no
+        # time, so they sit below every live prediction regardless of their
+        # internal renewal median.
+        live = [p["minutes_until"] for p in preds if p.get("display_mode") != "planning"]
+        assert live == sorted(live), "live predictions must be soonest-first"
+        flags = [p.get("display_mode") == "planning" for p in preds]
+        assert flags == sorted(flags), "planning cards must sort last"
 
     def test_contract_keys(self):
         p = client.get("/api/predictions?points=16").json()["predictions"][0]
