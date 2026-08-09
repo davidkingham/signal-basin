@@ -57,9 +57,21 @@ Two caveats, recorded up front:
 
 The runner-up candidate from the same sweep, **Lion**, was added the next day
 with the series model it needed — see the section below. Ruled out with
-numbers: White Dome (0.297),
-Aurum (0.319), Sawmill (0.306), Grotto (0.298), Lone Star (regular but 176
-entries in two years — backcountry logging is too sparse to anchor on).
+numbers: White Dome (0.297), Aurum (0.319), Sawmill (0.306), Grotto (0.298).
+
+**Lone Star is ruled out for a different reason and deserves the precise
+version.** The geyser itself is *more* regular than most of what we serve —
+tight-mode log-sd **0.147 at a 164-minute median** (p5–p95 123–204, n=74
+clean pairs over 3y), with minor/major structure on top. What fails is the
+observation channel: it is backcountry with no cell coverage, so only 26% of
+entries reach GeyserTimes within 30 minutes and the median entry latency is
+**2.7 hours — one full interval**; by the time an anchor arrives, the next
+eruption has usually already happened. Sampled at random moments, the newest
+logged eruption is a median of **206 hours old**, and an anchor fresh enough
+to predict from exists ~2% of the time. A live card would read "no report
+for 9 days" essentially always. The useful product for Lone Star is a
+*planning* answer (interval stats + "log it when you arrive"), not a
+countdown — unbuilt as of this writing.
 
 ## Lion, the ninth geyser (added 2026-08-09)
 
