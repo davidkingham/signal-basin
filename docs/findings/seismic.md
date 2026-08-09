@@ -108,14 +108,34 @@ Detection coverage is also worse than it first appeared: YNM has no usable
 data at 4 of 13 eruption times since late 2023 (telemetry gaps and one
 flatlined channel), and one eruption is seismically weak everywhere.
 
-**Where this leaves the detector**: amplitude features at these stations
-cannot meet "≈zero false positives with useful sensitivity." The credible
-next rung is spectral discrimination — hydrothermal tremor and boardwalk
-noise have different frequency content — which requires a labeled
-spectrogram dataset across seasons and real signal-processing work.
-Until someone does that work and validates a false-positive rate, the
-Steamboat card stays context-only. Two rounds of measurement now say so;
-a third attempt should start from the spectral features, not amplitude.
+**Round three, prompted by "are you sure?": YNR fails the same way, and
+for the structural reason.** YNR (Norris Junction, ~2 km, running since
+1993) was tested as the reference: it discriminates a real eruption at
+12.7 — and a known false positive at **6.3**, because the false positives
+are cultural noise local to the YNM vault. Two co-located sources cannot
+be separated by any remote station, however reliable. The
+reference-station family is closed with three stations measured, not
+assumed. (YNR also has 2025+ data gaps of its own.)
+
+**What the challenge surfaced instead — the night gate, quantified.**
+Every false positive in the 16-day sweep lands between 06:00 and 10:46
+local: museum noise is diurnal, eruption tremor is not. Against the
+existing data, a detector active 17:00–08:00 local, with a strict
+quiet-baseline gate (trailing median < 2,500) and the 15-minute sustained
+minimum ≥ 6,000, scores **4 clean detections of 13 eruptions (~31%) with
+zero false positives** — and the four are evening/overnight eruptions,
+exactly when human reports lag most. The honest framing would be
+"seismic watch, active overnight; detects roughly the louder half of
+in-window eruptions; silence means nothing." Before shipping even that,
+the zero-false-positive claim needs a 60–90 day gate-hours baseline
+(the current one is ~16 days) and the detection count is n=4.
+
+**Where this leaves the detector**: amplitude features cannot cover the
+full day — three designs measured say so — but a night-gated amplitude
+detector is a live, partially-validated option, and spectral
+discrimination remains the path to full-day coverage. The Steamboat card
+stays context-only until one of those passes a validation sized to the
+claim it would print.
 
 ## What shipped instead
 
