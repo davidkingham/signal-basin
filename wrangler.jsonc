@@ -1,6 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "geyser-ai",
+  "name": "signal-basin",
+  // Custom domain, ready to activate: register signalbasin.org (ideally
+  // through Cloudflare so the zone lands in this account), then uncomment
+  // and deploy.
+  // "routes": [{ "pattern": "signalbasin.org", "custom_domain": true }],
   "main": "worker/index.ts",
   "compatibility_date": "2026-08-03",
   "compatibility_flags": ["nodejs_compat"],

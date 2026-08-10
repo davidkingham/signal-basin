@@ -20,7 +20,7 @@ GEYSERS_API = "https://www.geysertimes.org/api/v5/geysers"
 
 # GeyserTimes runs Anubis, which challenges browser-like (Mozilla/...) user agents.
 # A plain identifying UA is both more honest and what actually gets served.
-USER_AGENT = "geyser-ai/0.1 (open-source geyser prediction research; +https://github.com/)"
+USER_AGENT = "signal-basin/0.1 (open-source geyser prediction research; signalbasin.org)"
 
 # Geysers we model. Names must match the archive's `geyser` column after normalization.
 TARGET_GEYSERS: tuple[str, ...] = (

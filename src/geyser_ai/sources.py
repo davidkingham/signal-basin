@@ -54,7 +54,7 @@ GEYSERS_NET_USER_ID = "44"
 
 SOURCE_LABELS: dict[str, dict[str, str]] = {
     "geyser_ai": {
-        "label": "Geyser AI",
+        "label": "Signal Basin",
         "window_label": "90%",
         "description": (
             "This project. A full predictive distribution rather than a point; the stated "

@@ -94,7 +94,7 @@ class TestSync:
         sync_mod.sync_recent(force=True)
         ua = calls[0]["headers"].get("User-Agent", "")
         assert ua == USER_AGENT
-        assert "geyser-ai" in ua
+        assert "signal-basin" in ua
         assert "Mozilla" not in ua, "must not impersonate a browser"
 
     def test_lookback_is_a_path_segment(self, calls):

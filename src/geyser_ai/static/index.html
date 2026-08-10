@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Geyser AI — next eruptions</title>
+<title>Signal Basin — next eruptions</title>
 <meta name="description" content="Probabilistic next-eruption predictions for Yellowstone geysers, built on public GeyserTimes data.">
 <meta name="color-scheme" content="light dark">
 <style>
@@ -408,7 +408,7 @@ select.btn{
 
 <header>
   <div class="brand">
-    <h1>Geyser<span class="ai"> AI</span></h1>
+    <h1>Signal<span class="ai"> Basin</span></h1>
     <div class="clock" id="clock">--:--</div>
   </div>
   <div class="sub">
@@ -969,7 +969,7 @@ const CMP_LIMIT  = 12;
 const SB_ALL_DAYS = 36500;   // the API's ceiling: "everything logged"
 const LOW_N      = 5;     // below this a rate is noise, and is labelled as such
 const SRC_FALLBACK = [
-  {key:"geyser_ai",   label:"Geyser AI",   window_label:"90%"},
+  {key:"geyser_ai",   label:"Signal Basin",   window_label:"90%"},
   {key:"nps",         label:"NPS",         window_label:"stated"},
   {key:"geysers_net", label:"Geysers.net", window_label:"stated"}
 ];
@@ -1069,7 +1069,7 @@ function renderKey(sources){
     // Why one source's lane has two bands and the others have one. Without
     // this, a nested band reads as a second, tighter window the single-window
     // sources were simply not allowed to draw.
-    + `<div class="key-note">Geyser AI is a distribution, so its lane shows
+    + `<div class="key-note">Signal Basin is a distribution, so its lane shows
        <b>two nested bands</b>: the solid inner one is its 50% interval, the
        faint dotted outer one its 90%. The NPS and Geysers.net each publish a
        single stated window, so they draw <b>one band</b> — the one they

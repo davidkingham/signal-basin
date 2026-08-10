@@ -166,6 +166,6 @@ class TestDashboard:
         r = client.get("/")
         assert r.status_code == 200
         body = r.text
-        assert "<title>" in body and "Geyser AI" in body
+        assert "<title>" in body and "Signal Basin" in body
         # the page depends on these endpoints existing
         assert "/api/predictions" in body and "/api/eruptions/recent" in body

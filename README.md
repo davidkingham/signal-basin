@@ -1,7 +1,9 @@
-# Geyser AI
+# Signal Basin
 
 An open-source analysis layer on top of the [GeyserTimes](https://geysertimes.org)
-database. GeyserTimes and its community of volunteer gazers have built the most
+database — **signalbasin.org** (domain pending; currently at the workers.dev
+URL below). The internal Python package and CLI keep their original
+`geyser-ai` name; only the product is renamed. GeyserTimes and its community of volunteer gazers have built the most
 complete geyser eruption record anywhere; this project adds probabilistic
 next-eruption prediction on top of it — full probability distributions rather
 than a point estimate with a fixed window, backtested honestly with published
@@ -14,7 +16,7 @@ their public data.
 
 Phase 0 (ingestion), Phase 1 (prediction engine + backtest) and Phase 2 (API,
 dashboard, MCP server) are complete, and the dashboard is deployed at
-**[geyser-ai.david-016.workers.dev](https://geyser-ai.david-016.workers.dev)**
+**[signal-basin.david-016.workers.dev](https://signal-basin.david-016.workers.dev)**
 (see [Deployment](#deployment)). See
 [`reports/calibration_report.md`](reports/calibration_report.md) for the full
 metrics table and calibration plots.
@@ -506,7 +508,7 @@ than a 500 on the page.
 
 ## Deployment
 
-Live at **https://geyser-ai.david-016.workers.dev**.
+Live at **https://signal-basin.david-016.workers.dev**.
 
 The Workers runtime has no DuckDB, no SciPy and no lifelines, so there is no
 version of this app that runs as a plain Worker. Instead the app runs unmodified

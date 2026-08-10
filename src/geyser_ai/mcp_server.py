@@ -22,7 +22,7 @@ from .service import (
 )
 
 mcp = MCPServer(
-    name="geyser-ai",
+    name="signal-basin",
     version="0.1.0",
     instructions=(
         "Probabilistic next-eruption predictions for Yellowstone geysers, built "

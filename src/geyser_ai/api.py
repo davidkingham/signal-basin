@@ -20,7 +20,7 @@ from .service import (
 STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(
-    title="Geyser AI",
+    title="Signal Basin",
     description=(
         "Probabilistic next-eruption predictions for Yellowstone geysers, built on "
         "public GeyserTimes data. Full distributions, honest uncertainty."

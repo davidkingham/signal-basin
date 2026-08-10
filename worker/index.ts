@@ -1,5 +1,5 @@
 /**
- * Front door for the Geyser AI container.
+ * Front door for the Signal Basin container.
  *
  * The Python/FastAPI + DuckDB stack cannot run on the Workers runtime, so the
  * app runs in a Cloudflare Container and this Worker is a thin proxy in front
@@ -297,7 +297,7 @@ const WARMING_PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="5">
-<title>Geyser AI — warming up</title>
+<title>Signal Basin — warming up</title>
 <style>
   :root { color-scheme: light dark; }
   body { margin:0; min-height:100vh; display:grid; place-items:center;
@@ -307,7 +307,7 @@ const WARMING_PAGE = `<!doctype html>
   p { margin:.25rem 0; color:#8fa9ab; }
 </style></head>
 <body><div>
-  <h1>Geyser AI</h1>
+  <h1>Signal Basin</h1>
   <p>Loading the eruption archive.</p>
   <p>This page refreshes itself in a few seconds.</p>
 </div></body></html>`;
