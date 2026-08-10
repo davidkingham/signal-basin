@@ -608,13 +608,22 @@ class TestCalibrationBoundary:
         led = ledger_mod.get_ledger()
         before = CALIBRATION_EPOCH - 86400
         after = CALIBRATION_EPOCH + 86400
-        for src, actual, eid in (("geyser_ai", before, 900001), ("geyser_ai", after, 900002),
-                                 ("nps", before, 900003)):
-            p = pred(src, geyser="Old Faithful", key=f"cal-{src}-{actual}",
-                     issued=actual - 3600, predicted=actual - 600,
-                     window=(actual - 1800, actual + 600))
-            res = match_and_score([p], [Eruption(geyser="Old Faithful", eruption_id=eid,
-                                                 epoch=actual)], actual + 3600)
+        for src, actual, eid in (
+            ("geyser_ai", before, 900001),
+            ("geyser_ai", after, 900002),
+            ("nps", before, 900003),
+        ):
+            p = pred(
+                src,
+                geyser="Old Faithful",
+                key=f"cal-{src}-{actual}",
+                issued=actual - 3600,
+                predicted=actual - 600,
+                window=(actual - 1800, actual + 600),
+            )
+            res = match_and_score(
+                [p], [Eruption(geyser="Old Faithful", eruption_id=eid, epoch=actual)], actual + 3600
+            )
             led.scored.extend(res.scored)
         led._trim()
 
