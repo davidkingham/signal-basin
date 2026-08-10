@@ -216,7 +216,21 @@ def get_predictions(
             r.get("minutes_until") if r.get("minutes_until") is not None else float("inf"),
         )
     )
+    # Live precursor signals: cheap reads, attached to their cards, never
+    # able to break the page. See signals.py for each signal's measured rate.
+    try:
+        from .signals import live_signals
+
+        sig = live_signals(db_path=db_path)
+        for r in ok:
+            notes = sig["cards"].get(r.get("geyser"))
+            if notes:
+                r["live_signals"] = notes
+        park_signals = sig["park"]
+    except Exception:
+        park_signals = []
     payload = {
+        "park_signals": park_signals,
         "generated_utc": pd.Timestamp.now(tz="UTC").isoformat(),
         "park_time": pd.Timestamp.now(tz=PARK_TZ).strftime("%Y-%m-%d %H:%M %Z"),
         "window_hours": hours,

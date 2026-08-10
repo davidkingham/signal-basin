@@ -292,6 +292,27 @@ legitimately known at prediction time.
   write-up claiming Castle's gain was "in variance rather than location" was
   describing a filter artifact, not the physics.
 
+### Live precursor signals, tiered by what each one earned (2026-08-09)
+
+Beyond the Indicator's countdown (below), the archive puts numbers on every
+precursor gazers watch, and each signal now surfaces on the dashboard wearing
+exactly its measured rate — the number is the honesty:
+
+| signal | → target | measured | role on the card |
+|---|---|---|---|
+| Beehive's South Bubbler | Beehive | 63% within 3 h, med 38 min | heads-up note |
+| Beehive's Close to Cone | Beehive | 36% within 2 h | (below display floor) |
+| Turban / West Triplet | Grand | 79% / 60% within 2–4 h | presence only: that rate is **logging bias** — people log Turban when they are already sitting at Grand near due time |
+| Giant Hot Period | Giant | **7%** within 6 h | park-wide alert, rate stated |
+| F&M Event Cycle | Fan & Mortar | **18%** within 24 h, med ~8 h | park-wide alert, rate stated |
+| Grotto Fountain | Grotto | 96% within minutes | simultaneous, not predictive — skipped |
+
+The two signals that would support real *nowcasts* — Riverside and Great
+Fountain **overflow** — live in GeyserTimes notes, which the public API does
+not expose (entries, predictions, geysers, users only; verified against the
+API docs 2026-08-09). A notes endpoint is the standing ask in the GT
+outreach draft.
+
 ### Beehive's Indicator is the most valuable live signal found
 
 Beehive's Indicator starts, and Beehive follows about 13 minutes later.

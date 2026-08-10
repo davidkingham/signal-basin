@@ -214,6 +214,14 @@ the effect is the opposite of what's intended.
 Everything is open source, GeyserTimes is credited throughout, and I have no
 commercial intent for this data.
 
+If you're ever considering API additions, one endpoint would unlock real
+value for visitors: **read access to notes**. Overflow reports for Riverside
+and Great Fountain live in notes, and overflow-to-eruption is regular enough
+that gazer-style predictions could be computed from them the way the NPS does
+in the visitor center — the eruption entries alone can't support that. No
+urgency and no expectation; it's simply the one thing the current API can't
+provide that observers' own practice shows would matter.
+
 Thank you for what you've built. The record itself is the achievement here; I'm
 just reading it carefully.
 

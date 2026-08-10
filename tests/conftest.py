@@ -131,9 +131,12 @@ def _build() -> None:
             next_id += len(ind) + 10
 
         if name == "Grand":
-            # Turban on its own ~19 min cycle across the same span.
-            t0, t1 = int(ep_kept[0]), int(ep_kept[-1])
-            tur = np.arange(t0, t1, 19 * 60) + _rng.normal(0, 120, len(range(t0, t1, 19 * 60)))
+            # Turban on its own ~19 min cycle, running all the way to "now" so
+            # the live-signals path has a fresh entry to find.
+            t0 = int(ep_kept[0])
+            tur = np.arange(t0, END_EPOCH, 19 * 60) + _rng.normal(
+                0, 120, len(range(t0, END_EPOCH, 19 * 60))
+            )
             rows += _rows("Turban", tur.astype(np.int64), next_id)
             next_id += len(tur) + 10
 
