@@ -35,7 +35,7 @@ from typing import Any
 
 import httpx
 
-from .config import DATA_DIR
+from .config import CALIBRATION_EPOCH, DATA_DIR
 from .scoring import LoggedPrediction, ScoredPrediction
 
 LOG = logging.getLogger(__name__)
@@ -141,7 +141,11 @@ class Ledger:
 
             try:
                 self.open = {p["key"]: LoggedPrediction.from_dict(p) for p in doc.get("open", [])}
-                self.scored = [ScoredPrediction.from_dict(s) for s in doc.get("scored", [])]
+                self.scored = [
+                    sp
+                    for sp in (ScoredPrediction.from_dict(s) for s in doc.get("scored", []))
+                    if not (sp.source == "geyser_ai" and sp.actual_epoch < CALIBRATION_EPOCH)
+                ]
                 self.started_utc = doc.get("started_utc") or _now_iso()
                 self.stats.update(doc.get("stats") or {})
                 self.error = None
@@ -226,7 +230,12 @@ class Ledger:
 
     def _trim(self) -> None:
         cutoff = int(dt.datetime.now(dt.UTC).timestamp()) - RETENTION_DAYS * 86400
-        self.scored = [s for s in self.scored if s.actual_epoch >= cutoff]
+        self.scored = [
+            s
+            for s in self.scored
+            if s.actual_epoch >= cutoff
+            and not (s.source == "geyser_ai" and s.actual_epoch < CALIBRATION_EPOCH)
+        ]
 
     # -- reads ----------------------------------------------------------
 

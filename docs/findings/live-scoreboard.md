@@ -179,3 +179,16 @@ to every one of them.
 - Geysers.net's Riverside predictions are badly biased this week (MAE 38.3,
   40% in-window vs our 17.7 / 90%) — the scoreboard is doing its job in both
   directions.
+
+
+## Disposition of the pre-calibration rows (2026-08-10)
+
+The 130 rows this project scored before the serving fix went live
+(2026-08-09T04:00Z) are **removed from the ledger and all public surfaces**
+at the owner's decision: the official record starts with the calibrated
+system. The removal is enforced at ledger load (`config.CALIBRATION_EPOCH`),
+so no flush resurrects them; the rows themselves are preserved off-display
+in `ledger/archive-precalibration.json` in R2, and the numbers quoted
+throughout this document remain the receipts. Third-party rows from the
+same era are untouched. Nothing was backfilled: every number that remains
+on the scoreboard was logged before its eruption, without exception.

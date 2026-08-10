@@ -52,3 +52,10 @@ PHASE_WINDOW_CYCLES: dict[str, float] = {
     "Till": 8.0,
 }
 PHASE_LIMITED_GEYSERS: frozenset[str] = frozenset(PHASE_WINDOW_CYCLES)
+
+# The official prediction record starts here: the verified production deploy
+# of the serving fix. Rows this project scored before it were a shakedown of
+# a buggy serving path, not the models; they are removed from the ledger at
+# load (owner's decision, 2026-08-10) and preserved off-display in
+# R2 ledger/archive-precalibration.json. Third-party rows are untouched.
+CALIBRATION_EPOCH = 1786248000  # 2026-08-09T04:00:00Z

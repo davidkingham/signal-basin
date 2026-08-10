@@ -591,52 +591,36 @@ def test_ledger_write_is_not_on_the_clock_of_the_request(tmp_path):
 
 
 class TestCalibrationBoundary:
-    """Pre-fix Signal Basin rows: never deleted, never aggregated, always labelled.
+    """Rows scored before the calibrated system went live do not exist publicly.
 
-    Backfilling was rejected outright -- a prospective ledger that rewrites
-    its past has no authority left. The boundary excludes only this project's
-    own rows from before the 2026-08-09 serving fix; third-party rows from
-    the same era were never ours to break and stay in the aggregates.
+    The ledger drops this project's pre-calibration rows at load and on every
+    trim (owner's decision, 2026-08-10): they measured a serving bug, and the
+    official record starts with the calibrated system. The removed rows are
+    archived off-display in R2. Third-party rows are untouched -- their
+    predictions were never ours to break. Nothing is ever backfilled.
     """
 
-    def _seed(self, epoch_offset_days: float, source: str = "geyser_ai"):
+    def test_prefix_own_rows_vanish_third_party_stays(self):
 
         import geyser_ai.service as svc
+        from geyser_ai.config import CALIBRATION_EPOCH
 
         led = ledger_mod.get_ledger()
-        actual = svc.CALIBRATION_EPOCH + int(epoch_offset_days * 86400)
-        p = pred(
-            source,
-            geyser="Old Faithful",
-            key=f"cal-{source}-{epoch_offset_days}",
-            issued=actual - 3600,
-            predicted=actual - 600,
-            window=(actual - 1800, actual + 600),
-        )
-        res = match_and_score(
-            [p],
-            [
-                Eruption(
-                    geyser="Old Faithful",
-                    eruption_id=int(1e6 + epoch_offset_days * 1000 + hash(source) % 100),
-                    epoch=actual,
-                )
-            ],
-            actual + 3600,
-        )
-        led.scored.extend(res.scored)
+        before = CALIBRATION_EPOCH - 86400
+        after = CALIBRATION_EPOCH + 86400
+        for src, actual, eid in (("geyser_ai", before, 900001), ("geyser_ai", after, 900002),
+                                 ("nps", before, 900003)):
+            p = pred(src, geyser="Old Faithful", key=f"cal-{src}-{actual}",
+                     issued=actual - 3600, predicted=actual - 600,
+                     window=(actual - 1800, actual + 600))
+            res = match_and_score([p], [Eruption(geyser="Old Faithful", eruption_id=eid,
+                                                 epoch=actual)], actual + 3600)
+            led.scored.extend(res.scored)
+        led._trim()
 
-    def test_prefix_rows_are_excluded_but_reported(self):
-        import geyser_ai.service as svc
-
-        self._seed(-1.0)  # ours, before the fix
-        self._seed(+1.0)  # ours, after the fix
-        self._seed(-1.0, source="nps")  # theirs, before the fix
         sb = svc.get_scoreboard(days=365, geyser="Old Faithful")
-        of = sb["rows"][0]["by_source"]
-        assert sb["precalibration"] is not None
-        assert sb["precalibration"]["n"] >= 1
-        assert "serving bug" in sb["precalibration"]["reason"]
-        # ours after the fix: aggregated; theirs before the fix: aggregated
-        assert of["geyser_ai"]["n"] >= 1
-        assert of["nps"]["n"] >= 1
+        assert "precalibration" not in sb, "no public trace of the removed era"
+        epochs = {(s.source, s.actual_epoch) for s in led.scored}
+        assert ("geyser_ai", before) not in epochs, "our pre-fix row must be gone"
+        assert ("geyser_ai", after) in epochs
+        assert ("nps", before) in epochs, "third-party history is untouched"
