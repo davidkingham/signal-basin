@@ -151,6 +151,25 @@ are near-impossible and p_current stays high; a plausibly-missed one reads
 may be too heavy for the long-interval geysers, but that is a calibration
 question for the backtest, not a badge question.
 
+## The third catch: the Indicator nowcast was blind in production (2026-08-10)
+
+A scored Beehive eruption showed the tell: "9.3 min early, IN WINDOW,
+**18h 25m ahead**" — the base interval model, scored at eighteen hours'
+lead, on an eruption whose Indicator was logged in GeyserTimes **ten
+minutes before the water**, in real time. The nowcast should have issued
+and superseded the base prediction; it never did, because
+`load_eruption_epochs` read only the frozen archive snapshot and never
+unioned `recent_eruptions` — the live-sync table where every real entry
+lives between snapshot publishes. The anchor path got that union from day
+one, which is why base predictions worked live and hid the gap: **the
+project's flagship live signal had never fired in production.** Local
+tests never caught it because the fixture builds everything into the
+archive path. Fixed with the same union the anchor uses, plus a
+regression test whose Indicator entry exists ONLY in the sync table.
+Pattern to remember: any reader that consumes eruption times must union
+both tables, and a test proving a live-only entry is visible belongs next
+to every one of them.
+
 ## Footnotes for data-quality.md
 
 - The ledger scored an Old Faithful eruption at 08-06 15:32 UTC that no longer

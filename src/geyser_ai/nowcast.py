@@ -81,18 +81,41 @@ class NowcastResult:
 
 
 def load_eruption_epochs(geyser: str, db_path=DB_PATH, since_year: int = 2010) -> np.ndarray:
-    """Sorted epochs for one geyser, near-duplicate entries collapsed."""
+    """Sorted epochs for one geyser, near-duplicate entries collapsed.
+
+    Unions the archive snapshot with `recent_eruptions` — the live-sync
+    table — exactly as the anchor path does. Without the union, a nowcast
+    can only see events that existed when the snapshot was built, which in
+    production means NEVER seeing a live Indicator: the Beehive override was
+    blind from deployment until 2026-08-10, when a scored eruption with a
+    ten-minute-early Indicator entry and no nowcast supersession exposed it.
+    """
     con = duckdb.connect(str(db_path), read_only=True)
     try:
+        has_recent = con.execute(
+            "SELECT count(*) FROM duckdb_tables() WHERE table_name = 'recent_eruptions'"
+        ).fetchone()[0]
+        recent_sql = (
+            "UNION ALL SELECT epoch FROM recent_eruptions WHERE geyser = ?"
+            if has_recent
+            else ""
+        )
+        params = [geyser, since_year] + ([geyser] if has_recent else [])
         df = con.execute(
-            """
-            WITH e AS (
-                SELECT epoch, lag(epoch) OVER (ORDER BY epoch) prev
-                FROM eruptions WHERE geyser = ? AND year(ts_local) >= ?
+            f"""
+            WITH combined AS (
+                SELECT epoch FROM eruptions WHERE geyser = ? AND year(ts_local) >= ?
+                {recent_sql}
+            ),
+            e AS (
+                SELECT DISTINCT epoch FROM combined
+            ),
+            seq AS (
+                SELECT epoch, lag(epoch) OVER (ORDER BY epoch) prev FROM e
             )
-            SELECT epoch FROM e WHERE prev IS NULL OR epoch - prev > 60 ORDER BY epoch
+            SELECT epoch FROM seq WHERE prev IS NULL OR epoch - prev > 60 ORDER BY epoch
             """,
-            [geyser, since_year],
+            params,
         ).df()
     finally:
         con.close()
