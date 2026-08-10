@@ -658,6 +658,17 @@ def _summarise(
     }
 
 
+# When the serving-path fix went live in production (verified that night; see
+# docs/findings/live-scoreboard.md). Signal Basin rows scored before this
+# measured a serving bug -- a constant ~93-minute Old Faithful, a marginal
+# Castle -- not the models. Those rows are NEVER deleted or recomputed: a
+# prospective ledger that rewrites its past has no authority left. They are
+# excluded from the headline aggregates and reported separately, labelled.
+# Third-party rows from the same era stay in the aggregates; their
+# predictions were never ours to break.
+CALIBRATION_EPOCH = int(dt.datetime(2026, 8, 9, 4, 0, tzinfo=dt.UTC).timestamp())
+
+
 def get_scoreboard(days: float = 30.0, geyser: str | None = None) -> dict[str, Any]:
     """Rolling accuracy per geyser per source, over the last `days`."""
     led = get_ledger()
@@ -666,6 +677,11 @@ def get_scoreboard(days: float = 30.0, geyser: str | None = None) -> dict[str, A
     scored = [s for s in led.scored if s.actual_epoch >= cutoff]
     if geyser:
         scored = [s for s in scored if s.geyser == geyser]
+
+    precal = [s for s in scored if s.source == "geyser_ai" and s.actual_epoch < CALIBRATION_EPOCH]
+    scored = [
+        s for s in scored if not (s.source == "geyser_ai" and s.actual_epoch < CALIBRATION_EPOCH)
+    ]
 
     sources = [{"key": key, **SOURCE_LABELS[key]} for key in ("geyser_ai", *THIRD_PARTY_SOURCES)]
 
@@ -697,6 +713,19 @@ def get_scoreboard(days: float = 30.0, geyser: str | None = None) -> dict[str, A
 
     # Never claim to cover time before the ledger existed: "last 365 days" on a
     # two-day-old ledger is two days of data, and the page should say so.
+    precal_note = None
+    if precal:
+        errs = [abs(p.signed_error_min) for p in precal if p.signed_error_min is not None]
+        precal_note = {
+            "n": len(precal),
+            "mae_min": round(sum(errs) / len(errs), 1) if errs else None,
+            "until_utc": dt.datetime.fromtimestamp(CALIBRATION_EPOCH, tz=dt.UTC).isoformat(),
+            "reason": (
+                "scored before the 2026-08-09 serving fix; these rows measured a "
+                "serving bug, not the models (see the findings). Kept in the "
+                "ledger, excluded from the aggregates above."
+            ),
+        }
     since = dt.datetime.fromtimestamp(cutoff, tz=dt.UTC)
     if led.started_utc:
         try:
@@ -712,6 +741,7 @@ def get_scoreboard(days: float = 30.0, geyser: str | None = None) -> dict[str, A
         "logging_started_utc": led.started_utc,
         "sources": sources,
         "rows": rows,
+        "precalibration": precal_note,
         "ledger": led.snapshot(),
         "methodology": METHODOLOGY,
     }

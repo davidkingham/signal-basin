@@ -96,9 +96,7 @@ def load_eruption_epochs(geyser: str, db_path=DB_PATH, since_year: int = 2010) -
             "SELECT count(*) FROM duckdb_tables() WHERE table_name = 'recent_eruptions'"
         ).fetchone()[0]
         recent_sql = (
-            "UNION ALL SELECT epoch FROM recent_eruptions WHERE geyser = ?"
-            if has_recent
-            else ""
+            "UNION ALL SELECT epoch FROM recent_eruptions WHERE geyser = ?" if has_recent else ""
         )
         params = [geyser, since_year] + ([geyser] if has_recent else [])
         df = con.execute(

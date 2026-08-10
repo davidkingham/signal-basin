@@ -20,27 +20,14 @@ from geyser_ai.nowcast import load_eruption_epochs
 
 
 def _insert_recent(geyser: str, epoch: int) -> None:
+    from geyser_ai.sync import _ensure_table
+
     con = duckdb.connect(os.environ["GEYSER_AI_DB"])
     try:
+        _ensure_table(con)  # the real schema, so later sync tests are unharmed
         con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS recent_eruptions (
-                eruption_id BIGINT PRIMARY KEY, geyser VARCHAR, epoch BIGINT,
-                ts_utc TIMESTAMP WITH TIME ZONE,
-                exact BOOLEAN, near_start BOOLEAN, in_eruption BOOLEAN,
-                electronic BOOLEAN, approximate BOOLEAN, webcam BOOLEAN,
-                initial BOOLEAN, major BOOLEAN, minor BOOLEAN, questionable BOOLEAN,
-                duration_seconds DOUBLE, entrant VARCHAR, observer VARCHAR,
-                comment VARCHAR, time_entered TIMESTAMP WITH TIME ZONE,
-                time_updated TIMESTAMP WITH TIME ZONE, primary_id BIGINT
-            )
-            """
-        )
-        con.execute(
-            "INSERT OR REPLACE INTO recent_eruptions (eruption_id, geyser, epoch, ts_utc, "
-            "exact, near_start, in_eruption, electronic, approximate, webcam, initial, "
-            "major, minor, questionable) VALUES (?, ?, ?, to_timestamp(?), false, false, "
-            "false, false, false, true, false, false, false, false)",
+            "INSERT OR REPLACE INTO recent_eruptions (eruption_id, geyser, epoch, ts_utc) "
+            "VALUES (?, ?, ?, to_timestamp(?))",
             [99990001, geyser, epoch, epoch],
         )
     finally:

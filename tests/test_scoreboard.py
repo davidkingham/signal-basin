@@ -588,3 +588,55 @@ def test_ledger_write_is_not_on_the_clock_of_the_request(tmp_path):
     started = time.monotonic()
     slow.flush()
     assert time.monotonic() - started < 1.0
+
+
+class TestCalibrationBoundary:
+    """Pre-fix Signal Basin rows: never deleted, never aggregated, always labelled.
+
+    Backfilling was rejected outright -- a prospective ledger that rewrites
+    its past has no authority left. The boundary excludes only this project's
+    own rows from before the 2026-08-09 serving fix; third-party rows from
+    the same era were never ours to break and stay in the aggregates.
+    """
+
+    def _seed(self, epoch_offset_days: float, source: str = "geyser_ai"):
+
+        import geyser_ai.service as svc
+
+        led = ledger_mod.get_ledger()
+        actual = svc.CALIBRATION_EPOCH + int(epoch_offset_days * 86400)
+        p = pred(
+            source,
+            geyser="Old Faithful",
+            key=f"cal-{source}-{epoch_offset_days}",
+            issued=actual - 3600,
+            predicted=actual - 600,
+            window=(actual - 1800, actual + 600),
+        )
+        res = match_and_score(
+            [p],
+            [
+                Eruption(
+                    geyser="Old Faithful",
+                    eruption_id=int(1e6 + epoch_offset_days * 1000 + hash(source) % 100),
+                    epoch=actual,
+                )
+            ],
+            actual + 3600,
+        )
+        led.scored.extend(res.scored)
+
+    def test_prefix_rows_are_excluded_but_reported(self):
+        import geyser_ai.service as svc
+
+        self._seed(-1.0)  # ours, before the fix
+        self._seed(+1.0)  # ours, after the fix
+        self._seed(-1.0, source="nps")  # theirs, before the fix
+        sb = svc.get_scoreboard(days=365, geyser="Old Faithful")
+        of = sb["rows"][0]["by_source"]
+        assert sb["precalibration"] is not None
+        assert sb["precalibration"]["n"] >= 1
+        assert "serving bug" in sb["precalibration"]["reason"]
+        # ours after the fix: aggregated; theirs before the fix: aggregated
+        assert of["geyser_ai"]["n"] >= 1
+        assert of["nps"]["n"] >= 1
