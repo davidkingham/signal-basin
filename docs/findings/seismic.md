@@ -180,13 +180,28 @@ coverage requires spectral discrimination; nothing less survives the
 data. Every one of these boundaries was set by measurement, most of them
 by someone asking "are you sure?" at the right moment.
 
-## What shipped instead
+## What shipped
 
-A Steamboat **context card**: days since the last major, the recent interval
-range from GeyserTimes, and an explicit statement that nobody can honestly
-predict it — which is the true state of knowledge, and saying it plainly is
-worth more than a decoration of false precision. The card computes from data
-already synced; no seismic dependency.
+Two things, in order of arrival:
+
+1. The Steamboat **context card**: days since the last major, the recent
+   interval range from GeyserTimes, and an explicit statement that nobody
+   can honestly predict it.
+
+2. **The season-aware seismic watch** (2026-08-09, after the four
+   validation rounds above): `seismic.py` polls WY.YNM on the service
+   cadence, maintains a rolling minute-RMS state through the worker's
+   writable prefix, and applies exactly the validated detector — quiet
+   baseline < 2,500, 15-minute sustained minimum ≥ max(6,000, 3× baseline),
+   YNR/YFT regional veto at 3×, 60-minute refractory — under the round-four
+   season policy: all hours in the shoulder seasons, night-gated in summer,
+   **suspended during the oversnow season with the reason printed on the
+   card**. A detection renders as "seismic signature consistent with a
+   major eruption — awaiting observer confirmation", never as certainty;
+   every other mode states its reason; and a dark station or lagging feed
+   says "watch offline" rather than pretending to watch. Detection latency
+   is ~15–20 minutes by construction — still hours ahead of a human report
+   overnight in the shoulder seasons.
 
 ## Where seismic integration would actually pay, ranked
 

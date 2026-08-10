@@ -136,6 +136,8 @@ export class GeyserContainer extends Container<Env> {
     GEYSER_AI_SNAPSHOT_MANIFEST_URL: `http://${SNAPSHOT_HOST}/${SNAPSHOT_MANIFEST_KEY}`,
     GEYSER_AI_SNAPSHOT_URL: `http://${SNAPSHOT_HOST}/${SNAPSHOT_KEY}`,
     GEYSER_AI_LEDGER_URL: `http://${SNAPSHOT_HOST}/${LEDGER_KEY}`,
+    // Seismic watch state rides the same writable prefix as the ledger.
+    GEYSER_AI_SEISMIC_URL: `http://${SNAPSHOT_HOST}/ledger/seismic.json`,
   };
 
   /**

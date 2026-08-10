@@ -248,6 +248,11 @@ def _offline(monkeypatch):
     import geyser_ai.service as svc
 
     monkeypatch.setattr(svc, "sync_recent", lambda **kw: {"cached": True, "n_last": 0})
+    # The seismic watch would poll EarthScope; offline it reports a dark
+    # station, which is exactly its honest degraded mode.
+    import geyser_ai.seismic as seismic_mod
+
+    monkeypatch.setattr(seismic_mod, "fetch_minute_rms", lambda *a, **k: None)
     # The scoreboard reaches for `predictions_latest` on the same cadence, so it
     # gets the same treatment. Tests that exercise the feed mock httpx directly.
     monkeypatch.setattr(svc, "fetch_predictions", lambda *a, **kw: [])

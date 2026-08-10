@@ -274,9 +274,18 @@ def _steamboat_context(db_path=DB_PATH) -> dict[str, Any] | None:
     now = pd.Timestamp.now(tz="UTC")
     last = pd.Timestamp(epochs[0], unit="s", tz="UTC")
     gaps_days = [(a - b) / 86400.0 for a, b in zip(epochs[:-1], epochs[1:], strict=False)]
+    # The seismic watch rides on the same tick, guarded the same way: it can
+    # only ever degrade to an honest status, never break the card.
+    try:
+        from .seismic import watch_tick
+
+        seismic = watch_tick()
+    except Exception as exc:  # pragma: no cover - defensive
+        seismic = {"status": "no_data", "reason": f"watch error: {type(exc).__name__}"}
     return {
         "geyser": "Steamboat",
         "display_mode": "context",
+        "seismic_watch": seismic,
         "last_eruption_utc": last.isoformat(),
         "last_eruption_local": last.tz_convert(PARK_TZ).strftime("%Y-%m-%d %H:%M %Z"),
         "days_since": round((now - last).total_seconds() / 86400.0, 1),

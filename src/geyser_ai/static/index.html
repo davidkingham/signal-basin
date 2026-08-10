@@ -713,6 +713,27 @@ function whyPanel(p){
   return d;
 }
 
+/* Steamboat's seismic watch line. Every mode states its reason; a
+   detection is "consistent with", never certainty. */
+function seismicLine(w){
+  if (!w) return "";
+  if (w.recent_detection){
+    const d = w.recent_detection;
+    return `<div class="overdue-note">Seismic signature at ${hhmm(d.detected_utc)}
+      (${d.hours_ago}h ago) consistent with a major eruption — awaiting observer
+      confirmation (${(d.veto_detail||"")})</div>`;
+  }
+  const label = {
+    watching: `seismic watch: quiet at Norris`,
+    paused:   `seismic watch paused — ${w.reason}`,
+    suspended:`seismic watch suspended — ${w.reason}`,
+    no_data:  `seismic watch offline — ${w.reason}`,
+  }[w.status] || "";
+  return label ? `<div class="at aside" style="color:var(--ink-3);font-size:11.5px">${label}
+    <span title="WY.YNM, detection latency ~${w.detection_latency_min||15} min; silence is no-information">·
+    ${w.status === "watching" ? "checked " + hhmm(w.checked_utc) : ""}</span></div>` : "";
+}
+
 /* ── cards ──────────────────────────────────────────────── */
 function card(p){
   // The server's minutes_until is frozen at payload-generation time and then
@@ -745,7 +766,8 @@ function card(p){
         The last ${ri.n} intervals ran ${Math.round(ri.min)}–${Math.round(ri.max)} days
         (median ${Math.round(ri.median)}).</div>
       <div class="at">Steamboat gives no reliable warning — nobody can honestly predict it,
-        so this card never will. It shows what is actually known instead.</div>`;
+        so this card never will. It shows what is actually known instead.</div>
+      ${seismicLine(p.seismic_watch)}`;
     const chips = document.createElement("div");
     chips.className = "chips";
     const c = document.createElement("span");
