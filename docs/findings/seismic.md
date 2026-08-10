@@ -148,9 +148,37 @@ eruption times, so the watch must present silence as no-information;
 and the veto depends on YNR being up (when both are dark, the watch is
 simply off).
 
-**Where this leaves the detector**: the night-gated watch is validated
-to the standard the card would print, with the caveats above worn on its
-sleeve. Full-day coverage still requires spectral discrimination.
+**Round four — "why exclude all daytime?" — the all-hours sweep and the
+seasonal truth (212 days, 4,797 hours).** Dropping the clock gate and
+re-sweeping everything, including the deep winter the first baseline never
+covered, produced 47 fires merging to 23 events. The regional veto killed
+only 3 (two teleseisms, one regional event). The 20 survivors rewrite the
+seasonal map:
+
+| season | all-hours verdict |
+|---|---|
+| Oct 1 – Dec 5 (closed, pre-oversnow) | 66 days × 24 h, **zero** surviving fires — full-day watch validated |
+| mid-Dec – mid-Mar (oversnow season) | ~18 surviving events, ~1 per 4 days, 6k–648k sustained — **unusable at any hour** |
+| Mar 22 – Apr 30 (closed, post-plowing) | clean |
+| summer | nights clean; two ~10:10–10:30 crossers → keep the night gate |
+
+The oversnow failures are *local* (YNR flat at 0.6–1.4× under all of
+them) and the calendar names the source: snowcoach stops at the Norris
+warming hut — which is at the museum, beside the vault — during midday
+hours, groomers at 01:00–02:40, and 300k–650k events matching grooming
+and spring plowing in late February and mid-March. Winter visitation
+parks vehicles on top of the seismometer; amplitude and duration overlap
+eruptions completely, and co-location defeats every station-geometry
+veto. The one season where gazers are scarcest is the one season this
+station cannot cover.
+
+**Where this leaves the detector**: a season-aware watch is validated —
+full-day in the shoulder seasons (October–early December,
+late March–April), night-gated in summer, and **honestly suspended
+during the oversnow season** with the reason stated on the card. Winter
+coverage requires spectral discrimination; nothing less survives the
+data. Every one of these boundaries was set by measurement, most of them
+by someone asking "are you sure?" at the right moment.
 
 ## What shipped instead
 
