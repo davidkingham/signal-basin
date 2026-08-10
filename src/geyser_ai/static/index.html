@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Signal Basin — next eruptions</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>♨️</text></svg>">
 <meta name="description" content="Probabilistic next-eruption predictions for Yellowstone geysers, built on public GeyserTimes data.">
 <meta name="color-scheme" content="light dark">
 <style>
@@ -916,11 +917,20 @@ function renderCards(pr){
 }
 
 /* ── load ───────────────────────────────────────────────── */
+// No fetch may hang the page: a stalled request (flaky network, DNS filter,
+// an aggressive blocker on a freshly registered domain) aborts at 45 s and
+// falls through to the error card, and the five-minute refresh retries.
+const fetchJson = (url) =>
+  fetch(url, { signal: AbortSignal.timeout(45000) }).then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  });
+
 async function load(){
   try{
     const [pr, ev] = await Promise.all([
-      fetch(`/api/predictions?hours=${HOURS}&points=140`).then(r => r.json()),
-      fetch(`/api/eruptions/recent?hours=24`).then(r => r.json())
+      fetchJson(`/api/predictions?hours=${HOURS}&points=140`),
+      fetchJson(`/api/eruptions/recent?hours=24`)
     ]);
     lastData = pr;
     renderAxis();
@@ -1446,7 +1456,7 @@ const jsonOk = r => { if (!r.ok) throw new Error(r.status); return r.json(); };
 
 async function loadScoreboard(){
   try{
-    const sb = await fetch(`/api/scoreboard?days=${sbDays}`).then(jsonOk);
+    const sb = await fetchJson(`/api/scoreboard?days=${sbDays}`);
     sbSources = (sb && sb.sources && sb.sources.length) ? sb.sources : SRC_FALLBACK;
     renderSbCtl();
     renderKey(sbSources);
@@ -1470,7 +1480,7 @@ async function loadComparisons(again){
   try{
     const q = new URLSearchParams({limit:CMP_LIMIT, offset:cmpOffset});
     if (cmpDay) q.set("day", cmpDay);
-    const cmp = await fetch(`/api/comparisons/recent?${q}`).then(jsonOk);
+    const cmp = await fetchJson(`/api/comparisons/recent?${q}`);
 
     // A selection can go stale under an auto-refresh — the ledger is rewritten
     // by the scoring job, not by us. If the chosen day is gone, or the page is
