@@ -144,9 +144,13 @@ class Ledger:
                 self.scored = [
                     sp
                     for sp in (ScoredPrediction.from_dict(s) for s in doc.get("scored", []))
-                    if not (sp.source == "geyser_ai" and sp.actual_epoch < CALIBRATION_EPOCH)
+                    if sp.actual_epoch >= CALIBRATION_EPOCH
                 ]
-                self.started_utc = doc.get("started_utc") or _now_iso()
+                started = doc.get("started_utc") or _now_iso()
+                # The record starts at the calibration epoch for every source
+                # alike, so the header never claims coverage it no longer shows.
+                floor = dt.datetime.fromtimestamp(CALIBRATION_EPOCH, dt.UTC).isoformat()
+                self.started_utc = max(started, floor)
                 self.stats.update(doc.get("stats") or {})
                 self.error = None
             except (KeyError, TypeError, ValueError) as exc:
@@ -230,12 +234,7 @@ class Ledger:
 
     def _trim(self) -> None:
         cutoff = int(dt.datetime.now(dt.UTC).timestamp()) - RETENTION_DAYS * 86400
-        self.scored = [
-            s
-            for s in self.scored
-            if s.actual_epoch >= cutoff
-            and not (s.source == "geyser_ai" and s.actual_epoch < CALIBRATION_EPOCH)
-        ]
+        self.scored = [s for s in self.scored if s.actual_epoch >= max(cutoff, CALIBRATION_EPOCH)]
 
     # -- reads ----------------------------------------------------------
 

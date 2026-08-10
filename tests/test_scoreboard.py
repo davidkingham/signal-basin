@@ -591,13 +591,13 @@ def test_ledger_write_is_not_on_the_clock_of_the_request(tmp_path):
 
 
 class TestCalibrationBoundary:
-    """Rows scored before the calibrated system went live do not exist publicly.
+    """Rows scored before the record start do not exist publicly, any source.
 
-    The ledger drops this project's pre-calibration rows at load and on every
-    trim (owner's decision, 2026-08-10): they measured a serving bug, and the
-    official record starts with the calibrated system. The removed rows are
-    archived off-display in R2. Third-party rows are untouched -- their
-    predictions were never ours to break. Nothing is ever backfilled.
+    The ledger drops all pre-calibration rows at load and on every trim
+    (owner's decision, 2026-08-10): ours measured a serving bug, and the
+    third-party rows are aligned so the comparison runs every source over
+    the same window. Removed rows are archived off-display in R2. Nothing
+    is ever backfilled.
     """
 
     def test_prefix_own_rows_vanish_third_party_stays(self):
@@ -632,4 +632,6 @@ class TestCalibrationBoundary:
         epochs = {(s.source, s.actual_epoch) for s in led.scored}
         assert ("geyser_ai", before) not in epochs, "our pre-fix row must be gone"
         assert ("geyser_ai", after) in epochs
-        assert ("nps", before) in epochs, "third-party history is untouched"
+        # The record start is source-blind: the comparison runs every source
+        # over the same window, so third-party era rows are aligned out too.
+        assert ("nps", before) not in epochs

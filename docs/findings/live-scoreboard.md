@@ -189,6 +189,11 @@ at the owner's decision: the official record starts with the calibrated
 system. The removal is enforced at ledger load (`config.CALIBRATION_EPOCH`),
 so no flush resurrects them; the rows themselves are preserved off-display
 in `ledger/archive-precalibration.json` in R2, and the numbers quoted
-throughout this document remain the receipts. Third-party rows from the
-same era are untouched. Nothing was backfilled: every number that remains
-on the scoreboard was logged before its eruption, without exception.
+throughout this document remain the receipts.
+
+Extended the same day: the record start is **source-blind** — the 219
+third-party rows from the same era were aligned out as well (also
+archived), so the head-to-head comparison runs every source over the same
+window, and the scoreboard header dates the record from the calibration
+epoch. Nothing was backfilled: every number that remains on the scoreboard
+was logged before its eruption, without exception.
