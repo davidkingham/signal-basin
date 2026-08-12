@@ -99,8 +99,8 @@ from before the eruption it predicts:
 Three honest caveats, because I'd rather you hear them from me:
 
 - **The fancy model lost.** A survival model with covariates (previous interval,
-  time of day, season, entry flags) ranked in the bottom half on all seven
-  geysers. Simple rolling lognormal/Weibull fits beat it nearly everywhere, and
+  time of day, season, entry flags) ranked in the bottom half on every geyser
+  tested. Simple rolling lognormal/Weibull fits beat it nearly everywhere, and
   a plain rolling mean ± window — essentially what the current dashboard shows —
   wins outright on Beehive. The gains here came from cleaning the data, not from
   clever statistics.

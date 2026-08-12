@@ -348,7 +348,7 @@ failed.
 ### The covariate survival model does not earn its complexity
 
 `weibull_aft` (lifelines Weibull AFT with previous interval, hour of day, day of
-year, entry flags) ranks in the **bottom half on all eight unimodal geysers**.
+year, entry flags) ranks in the **bottom half on every unimodal geyser**.
 (On Lion it lands second -- covariates help when the process really has state --
 but still 11% behind the purpose-built series model.) Simple
 rolling lognormal/Weibull fits beat it nearly everywhere, and a plain rolling

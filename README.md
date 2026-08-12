@@ -14,12 +14,20 @@ their public data.
 
 ## Status
 
-Phase 0 (ingestion), Phase 1 (prediction engine + backtest) and Phase 2 (API,
-dashboard, MCP server) are complete, and the dashboard is deployed at
-**[signalbasin.org](https://signalbasin.org)**
-(see [Deployment](#deployment)). See
+Live at **[signalbasin.org](https://signalbasin.org)**: fourteen geyser cards
+across four honest serving modes — eleven live predictions, two phase-limited
+cards (Lone Star and Till serve a countdown only while their anchor still
+carries phase, a planning card otherwise), and a Steamboat context card that
+names no time because nobody honestly can. On top of the interval models:
+Beehive's Indicator nowcast, live precursor signal notes that print their own
+measured hit rates, and a validated season-aware seismic watch on Steamboat
+via the Norris seismometer. Every card explains its own reasoning ("why this
+time?"), and a public scoreboard scores every prediction against the NPS and
+Geysers.net over the identical window, with the record starting 2026-08-09 —
+the day the calibrated system went live. See
 [`reports/calibration_report.md`](reports/calibration_report.md) for the full
-metrics table and calibration plots.
+metrics table and [`docs/findings/`](docs/findings/README.md) for everything
+learned along the way, negative results included.
 
 ## Setup
 

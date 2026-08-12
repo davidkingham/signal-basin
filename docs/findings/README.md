@@ -26,15 +26,21 @@ live through it. Two rules the whole set follows:
 
 ## The one-paragraph summary
 
-Cleaning the data has beaten modelling at every single step. Four successive
-fixes to the interval validity filter each moved the headline metrics more than
-any model change ever has, and the largest single improvement available at any
-point came from noticing the filter was *deleting* real data. The best covariate
-in the project — the `minor` flag — was already in the archive, recorded by
-volunteers. The most sophisticated model, a survival regression with covariates,
-finished in the bottom half on every unimodal geyser. Of the external forcings the
-literature proposes, exactly one is real and large enough to matter for
-prediction (wind on Daisy), and we have not implemented it yet.
+Cleaning the data has beaten modelling at every single step. Six generations
+of the interval validity filter each moved the headline metrics more than any
+model change ever has, and the largest improvements came from noticing the
+filter was *deleting* real data — Castle's minor mode, Lion's series gaps,
+Lone Star's entire cycle. The best covariates in the project — the `minor`
+and `initial` flags — were already in the archive, recorded by volunteers.
+The most sophisticated model, a survival regression with covariates, finished
+in the bottom half on every unimodal geyser. Going live taught its own
+lessons: the prospective scoreboard caught three serving bugs the backtest
+never could (a discarded conditional model, observation completeness read at
+the wrong hour, a nowcast blind to live data), and the seismic work produced
+four rounds of validated negative results before one season-aware watch
+earned its place. Of the external forcings the literature proposes, exactly
+one is real and large enough to matter for prediction (wind on Daisy), and we
+have not implemented it yet.
 
 ## Conventions
 
