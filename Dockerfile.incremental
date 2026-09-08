@@ -1,0 +1,34 @@
+# Emergency deploy path: the image that is already running, plus this tree's code.
+#
+# Why this exists. A clean `Dockerfile` build produces a fresh ~250 MB (compressed)
+# venv layer that has to be uploaded. This uplink cannot complete a single upload
+# much above 25 MB -- measured with plain curl against Cloudflare, no Docker in
+# the path: 5/15/25 MB succeed, 50 MB and 100 MB die mid-body. So a normal deploy
+# cannot finish from here, however many times it is retried.
+#
+# Every layer of an image already in Cloudflare's registry is, by definition,
+# already in Cloudflare's registry. Building on top of the deployed image and
+# copying only `src/` and `deploy/` over it makes the push a few hundred kilobytes
+# instead of a few hundred megabytes. The venv, base image, user, environment and
+# CMD are inherited unchanged, so the result is the running production image with
+# new code on it -- not a different environment.
+#
+# Usage:
+#   1. `npx wrangler containers images list` -> newest tag
+#   2. set BASE below to it
+#   3. point wrangler.jsonc containers[].image at this file
+#   4. `npx wrangler deploy`
+#   5. put wrangler.jsonc back
+#
+# Verify before you use it that no file has been DELETED from src/ since the base
+# image was built -- COPY overwrites and adds, it does not remove, so a deleted
+# module would linger:
+#   docker run --rm --entrypoint sh $BASE -c 'cd /app && find src deploy -type f'
+#
+# The clean `Dockerfile` remains the normal path. Use this when the network will
+# not carry a full push, and rebuild properly from a better connection.
+ARG BASE=registry.cloudflare.com/0164f94eae0d65c54aab03c444d3aba1/signal-basin-geysercontainer:0e4278d7
+FROM ${BASE}
+
+COPY --chown=geyser:geyser src /app/src
+COPY --chown=geyser:geyser deploy /app/deploy

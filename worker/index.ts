@@ -96,6 +96,73 @@ const MAX_REFRESH_TARGETS = 6;
 const MAX_STALE_MS = 10 * 60_000;
 
 /**
+ * Contact form.
+ *
+ * Most gazers do not have a GitHub account, and the whole point of publishing
+ * the method is to be told where it is wrong -- so there is a form, and it
+ * sends mail through Postmark. It lives in the Worker rather than in the
+ * container for the same reason the R2 credentials do: the container image
+ * holds no credentials, and a token baked into it would travel with every
+ * image push. `POSTMARK_TOKEN` and `CONTACT_TO` are secrets (`wrangler secret
+ * put`); the destination address is one of them so it never lands in a public
+ * repository.
+ *
+ * The endpoint sends email on someone else's quota from an unauthenticated
+ * request, so it is deliberately unexciting to abuse: a honeypot field, a
+ * minimum dwell time, hard length caps, and a per-IP allowance kept in the
+ * Durable Object storage that is already here.
+ */
+const CONTACT_PATH = "/api/contact";
+const MAIL_FROM = "Signal Basin <no-reply@signalbasin.org>";
+const POSTMARK_URL = "https://api.postmarkapp.com/email";
+/** Postmark separates transactional from bulk; corrections are transactional. */
+const POSTMARK_STREAM = "outbound";
+
+const MSG_MIN = 10;
+const MSG_MAX = 4000;
+/** Nobody types a real report in under three seconds; a script does. */
+const DWELL_MIN_MS = 3_000;
+const BODY_MAX_BYTES = 16_000;
+const PER_IP_HOUR = 3;
+const PER_IP_DAY = 10;
+/**
+ * Whole-site backstop. Reaching it needs ~170 distinct addresses in a day,
+ * which is an attack rather than a busy morning, and the failure it buys is a
+ * temporarily closed form rather than a drained Postmark quota.
+ */
+const CONTACT_LOG_CAP = 500;
+const CONTACT_LOG_KEY = "contact:log";
+
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
+interface ContactEntry {
+  /** Truncated SHA-256 of the address -- enough to count, not enough to identify. */
+  ip: string;
+  t: number;
+}
+
+/**
+ * Rate limiting needs to tell addresses apart, not to know them, so the raw
+ * address never reaches storage. Unsalted and truncated on purpose: this is a
+ * counting key with a 24-hour life, not an authentication secret.
+ */
+async function hashIp(ip: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ip));
+  return [...new Uint8Array(digest)]
+    .slice(0, 8)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** Single-line fields go into a mail header; newlines have no business in them. */
+const oneLine = (s: unknown, max: number): string =>
+  typeof s === "string" ? s.replace(/[\r\n]+/g, " ").trim().slice(0, max) : "";
+
+/** Deliberately loose: this only decides whether Reply-To is worth setting. */
+const looksLikeEmail = (s: string): boolean => /^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(s);
+
+/**
  * The unconditional ledger tick. The host is arbitrary -- the container is
  * reached through the Durable Object, not DNS -- but the path is not: this
  * endpoint is what generates a forecast, logs it, pulls the third-party
@@ -115,6 +182,13 @@ function freshnessFor(pathname: string): number | null {
     return 120_000;
   }
   if (pathname === "/api/stats") return 3_600_000;
+  // The method document is a static read of the committed calibration artifact:
+  // it changes when a new backtest is deployed and at no other time, so it is
+  // cached for as long as anything here is, and a reader who opens "how this is
+  // modelled" never wakes the container to be told what the image already knows.
+  if (pathname === "/api/method" || pathname.startsWith("/api/method/")) {
+    return 3_600_000;
+  }
   // /api/health stays uncached: it is the honest freshness probe, and it is cheap.
   return null;
 }
@@ -223,6 +297,35 @@ export class GeyserContainer extends Container<Env> {
 
   async writeCache(key: string, entry: CacheEntry): Promise<void> {
     await this.ctx.storage.put(key, entry);
+  }
+
+  /**
+   * Spend one contact-form allowance, or refuse.
+   *
+   * One pruned key rather than a key per sender: the log is bounded by the
+   * limits themselves, drops anything older than a day on every write, and
+   * leaves nothing behind to sweep up. Storage is the Durable Object's own, so
+   * this never touches -- or wakes -- the container.
+   *
+   * The allowance is spent before the mail is sent, so a Postmark failure still
+   * costs the sender an attempt. That is the intended direction: a form that
+   * refunds on failure is a form that can be retried in a loop.
+   */
+  async spendContactAllowance(ipHash: string): Promise<{ ok: boolean; reason?: string }> {
+    const now = Date.now();
+    const log = (await this.ctx.storage.get<ContactEntry[]>(CONTACT_LOG_KEY)) ?? [];
+    const recent = log.filter((e) => now - e.t < DAY_MS);
+
+    if (recent.length >= CONTACT_LOG_CAP) return { ok: false, reason: "site" };
+    const mine = recent.filter((e) => e.ip === ipHash);
+    if (mine.filter((e) => now - e.t < HOUR_MS).length >= PER_IP_HOUR) {
+      return { ok: false, reason: "hour" };
+    }
+    if (mine.length >= PER_IP_DAY) return { ok: false, reason: "day" };
+
+    recent.push({ ip: ipHash, t: now });
+    await this.ctx.storage.put(CONTACT_LOG_KEY, recent);
+    return { ok: true };
   }
 
   /** Endpoints worth recomputing right now: the ones read recently, newest first. */
@@ -372,10 +475,156 @@ async function refresh(stub: Stub, request: Request, key: string): Promise<Respo
   });
 }
 
+/**
+ * Take a correction from a reader and mail it on.
+ *
+ * Every rejection is a plain JSON reason the form can show, because the person
+ * on the other end is a gazer who just typed out what they saw and deserves to
+ * know whether it went anywhere.
+ */
+async function handleContact(request: Request, env: Env, stub: Stub): Promise<Response> {
+  if (request.method !== "POST") {
+    return Response.json({ error: "Send a POST." }, { status: 405 });
+  }
+  if (!env.POSTMARK_TOKEN || !env.CONTACT_TO) {
+    console.error(JSON.stringify({ event: "contact_not_configured" }));
+    return Response.json(
+      { error: "The contact form is not set up yet. Please try again later." },
+      { status: 503 },
+    );
+  }
+
+  // Bounded before it is read: a body this endpoint would reject anyway must
+  // not be buffered first.
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (declared > BODY_MAX_BYTES) {
+    return Response.json({ error: "That message is too long." }, { status: 413 });
+  }
+
+  let payload: Record<string, unknown>;
+  try {
+    const raw = (await request.text()).slice(0, BODY_MAX_BYTES);
+    payload = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return Response.json({ error: "Could not read that message." }, { status: 400 });
+  }
+
+  // A hidden field no human can see and no human can fill in.
+  if (oneLine(payload.website, 200)) {
+    console.log(JSON.stringify({ event: "contact_honeypot" }));
+    // Answer exactly as success does: a bot that learns which field betrayed it
+    // simply stops filling it in.
+    return Response.json({ ok: true });
+  }
+
+  const message = typeof payload.message === "string" ? payload.message.trim() : "";
+  if (message.length < MSG_MIN) {
+    return Response.json({ error: "Please say a little more than that." }, { status: 400 });
+  }
+  if (message.length > MSG_MAX) {
+    return Response.json(
+      { error: `Please keep it under ${MSG_MAX} characters.` },
+      { status: 400 },
+    );
+  }
+
+  const dwell = Number(payload.elapsed_ms);
+  if (!Number.isFinite(dwell) || dwell < DWELL_MIN_MS) {
+    return Response.json({ error: "That was too quick — try again." }, { status: 400 });
+  }
+
+  const email = oneLine(payload.email, 200);
+  if (email && !looksLikeEmail(email)) {
+    return Response.json(
+      { error: "That email address does not look right. Leave it blank if you prefer." },
+      { status: 400 },
+    );
+  }
+
+  const subjectOf = oneLine(payload.geyser, 60) || "General";
+  const page = oneLine(payload.page, 200);
+
+  const ipHash = await hashIp(request.headers.get("cf-connecting-ip") ?? "unknown");
+  const allowance = await stub.spendContactAllowance(ipHash);
+  if (!allowance.ok) {
+    const detail =
+      allowance.reason === "site"
+        ? "The form is taking a break — a lot has come in today. Please try tomorrow."
+        : "That is a few messages in a short time. Please try again later today.";
+    return Response.json({ error: detail }, { status: 429, headers: { "retry-after": "3600" } });
+  }
+
+  const country = (request as { cf?: { country?: string } }).cf?.country ?? "unknown";
+  const body = [
+    `Geyser:  ${subjectOf}`,
+    `Page:    ${page || "(not given)"}`,
+    `Reply:   ${email || "(no address given)"}`,
+    `Sent:    ${new Date().toISOString()} (${country})`,
+    "",
+    message,
+    "",
+    "— sent from the contact form on signalbasin.org",
+  ].join("\n");
+
+  try {
+    const sent = await fetch(POSTMARK_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+        "x-postmark-server-token": env.POSTMARK_TOKEN,
+      },
+      body: JSON.stringify({
+        From: MAIL_FROM,
+        To: env.CONTACT_TO,
+        // Only set when it parses, so a typo cannot make the mail unrepliable.
+        ...(email ? { ReplyTo: email } : {}),
+        Subject: `[Signal Basin] ${subjectOf}`,
+        TextBody: body,
+        MessageStream: POSTMARK_STREAM,
+      }),
+    });
+
+    if (!sent.ok) {
+      // Postmark's errors are small JSON documents; cap anyway rather than trust.
+      const detail = (await sent.text()).slice(0, 500);
+      console.error(JSON.stringify({ event: "postmark_failed", status: sent.status, detail }));
+      return Response.json(
+        { error: "The message could not be sent just now. Please try again shortly." },
+        { status: 502 },
+      );
+    }
+  } catch (err) {
+    console.error(JSON.stringify({ event: "postmark_error", error: String(err) }));
+    return Response.json(
+      { error: "The message could not be sent just now. Please try again shortly." },
+      { status: 502 },
+    );
+  }
+
+  console.log(JSON.stringify({ event: "contact_sent", geyser: subjectOf, replyable: !!email }));
+  return Response.json({ ok: true });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const stub = getContainer(env.GEYSER_CONTAINER, SINGLETON);
     const url = new URL(request.url);
+
+    // Answered here, never proxied: the container knows nothing about mail and
+    // holds no credentials to send it with.
+    if (url.pathname === CONTACT_PATH) {
+      try {
+        return await handleContact(request, env, stub);
+      } catch (err) {
+        console.error(JSON.stringify({ event: "contact_failed", error: String(err) }));
+        return Response.json(
+          { error: "Something went wrong sending that. Please try again shortly." },
+          { status: 500 },
+        );
+      }
+    }
+
     const freshMs = request.method === "GET" ? freshnessFor(url.pathname) : null;
 
     try {

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+from typing import Any
 
 import duckdb
 import matplotlib
@@ -14,6 +16,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 from .backtest import ScoreRow  # noqa: E402
 from .config import DB_PATH, FIGURES_DIR, REPORTS_DIR, TARGET_GEYSERS  # noqa: E402
+from .method import CALIBRATION_PATH  # noqa: E402
 
 # Fixed categorical order, validated colorblind-safe (OKLab CVD dE >= 8 adjacent).
 # Assigned by model identity and never cycled, so a model keeps its color across
@@ -214,6 +217,81 @@ def plot_example_density(geyser: str, db_path=DB_PATH) -> str | None:
     fig.savefig(path, dpi=140, bbox_inches="tight")
     plt.close(fig)
     return path.name
+
+
+def write_calibration_json(
+    scores: list[ScoreRow],
+    years: int,
+    honest: dict[str, dict],
+    nowcasts: dict[str, dict],
+    entry_mix: pd.DataFrame,
+    total_gaps: int,
+    valid_gaps: int,
+) -> str:
+    """The same results, machine-readable, for the served methodology page.
+
+    Written into the package rather than into `reports/` on purpose: the
+    deployed image copies `src/` and nothing else, so this is the only place a
+    calibration artifact can live and still be readable in production. It is
+    committed to the repository like any other served asset -- regenerate it by
+    re-running the backtest, and commit the diff alongside the markdown report
+    so the page and the report can never disagree.
+    """
+    geysers: dict[str, Any] = {}
+    for s in sorted(scores, key=lambda r: (list(TARGET_GEYSERS).index(r.geyser), r.crps)):
+        entry = geysers.setdefault(s.geyser, {"models": []})
+        entry["models"].append(
+            {
+                "model": s.model,
+                "n": s.n,
+                "crps": round(s.crps, 1),
+                "mae": round(s.mae_median, 1),
+                "cov50": round(s.cover50, 4),
+                "cov90": round(s.cover90, 4),
+            }
+        )
+    for g, hc in honest.items():
+        if g in geysers:
+            geysers[g]["honest"] = {
+                "n": hc["n"],
+                "pct_rejected": round(hc["pct_filtered_out"], 1),
+                "cov50": round(hc["cover50"], 4),
+                "cov90": round(hc["cover90"], 4),
+            }
+    for _, r in entry_mix.iterrows():
+        if r["geyser"] in geysers:
+            geysers[r["geyser"]]["entry_mix"] = {
+                "webcam": float(r["pct_webcam"]),
+                "electronic": float(r["pct_electronic"]),
+                "approximate": float(r["pct_approx"]),
+                "in_eruption": float(r["pct_in_eye"]),
+            }
+
+    def _regime(a: dict) -> dict:
+        return {
+            "n": a["n"],
+            "crps_off": round(a["off"]["crps"], 1),
+            "crps_on": round(a["on"]["crps"], 1),
+            "delta_pct": round(a["crps_delta_pct"], 1),
+            "cov90_off": round(a["off"]["cover90"], 2),
+            "cov90_on": round(a["on"]["cover90"], 2),
+        }
+
+    payload = {
+        "generated": dt.date.today().isoformat(),
+        "backtest_years": years,
+        "intervals": {"total_gaps": int(total_gaps), "valid_gaps": int(valid_gaps)},
+        "geysers": geysers,
+        "nowcast": {
+            g: {
+                "overall": _regime(res["overall"]),
+                "by_regime": {k: _regime(v) for k, v in sorted(res["by_regime"].items())},
+            }
+            for g, res in nowcasts.items()
+        },
+    }
+    CALIBRATION_PATH.write_text(json.dumps(payload, indent=1, ensure_ascii=False) + "\n")
+    return str(CALIBRATION_PATH)
 
 
 def _coverage_flag(actual: float, nominal: float) -> str:
@@ -472,6 +550,11 @@ def write_report(
         "\nData courtesy of [GeyserTimes.org](https://geysertimes.org) and its "
         "community of volunteer observers.\n"
     )
+
+    # The same numbers, machine-readable, for the served /method page. Emitted
+    # from this function rather than a separate pass so the page and the report
+    # are always the same backtest run.
+    write_calibration_json(scores, years, honest, nowcasts, flags, tot, val)
 
     path = REPORTS_DIR / "calibration_report.md"
     path.write_text("\n".join(lines))

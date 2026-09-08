@@ -96,13 +96,16 @@ h1 .ai{color:var(--brand)}
 }
 .dot{width:7px;height:7px;border-radius:50%;background:var(--pool-300);display:inline-block}
 .dot.warn{background:var(--amber)} .dot.bad{background:var(--mat)}
-button.theme{
+/* The theme toggle and the link to the method page share one pill: two small
+   controls of equal weight, neither of them competing with the data. */
+button.theme,a.theme{
   background:none;border:1px solid var(--line);color:var(--ink-3);
   border-radius:99px;font-family:var(--mono);font-size:10.5px;
-  padding:3px 9px;cursor:pointer;letter-spacing:.08em;
+  padding:3px 9px;cursor:pointer;letter-spacing:.08em;text-decoration:none;
 }
-button.theme:hover{color:var(--ink);border-color:var(--ink-3)}
-button.theme:focus-visible{outline:2px solid var(--pool-500);outline-offset:2px}
+button.theme:hover,a.theme:hover{color:var(--ink);border-color:var(--ink-3)}
+button.theme:focus-visible,a.theme:focus-visible{
+  outline:2px solid var(--pool-500);outline-offset:2px}
 
 /* ── shared time axis (the page is one instrument) ──────── */
 .axis{
@@ -217,6 +220,28 @@ details.why a{color:var(--brand);text-decoration:none}
 .hyp-row .bar{grid-column:2;height:3px;border-radius:2px;background:var(--line);overflow:hidden}
 .hyp-row .bar i{display:block;height:100%;background:var(--pool-300)}
 .hyp-row.missed .bar i{background:var(--amber)}
+
+/* "how this is modelled" — the same disclosure, one level deeper: what serves
+   this card, what it scored in the backtest, and what it is known to get
+   wrong. Collapsed like its sibling, because the page is for reading a
+   countdown; this is for arguing with the countdown. */
+details.why code{font-family:var(--mono);font-size:.9em;background:var(--band-90);
+  padding:1px 4px;border-radius:4px}
+.mstats{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
+.mstat{border:1px solid var(--line);border-radius:8px;padding:4px 8px;line-height:1.25}
+.mstat b{display:block;font-family:var(--mono);font-size:8.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.mstat span{font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums;
+  color:var(--ink)}
+.mstat.off span{color:var(--amber)}
+.mgaps{margin:9px 0 0;padding:0;list-style:none}
+.mgaps li{position:relative;padding:0 0 6px 14px;font-size:12px;color:var(--ink-2);
+  line-height:1.5}
+.mgaps li::before{content:"";position:absolute;left:0;top:7px;width:5px;height:5px;
+  border-radius:50%;background:var(--mat)}
+.more{display:inline-block;margin-top:9px;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.05em;color:var(--brand);text-decoration:none}
+.more:hover{text-decoration:underline}
 
 /* ── recent feed ────────────────────────────────────────── */
 h2{
@@ -421,6 +446,7 @@ select.btn{
   <div class="tagline">Yellowstone geyser predictions</div>
   <div class="sub">
     <span><span class="dot" id="status-dot"></span> <span id="status">loading…</span></span>
+    <a class="theme" href="/method">method</a>
     <button class="theme" id="theme" type="button">theme</button>
   </div>
 </header>
@@ -476,6 +502,12 @@ select.btn{
   Predictions are probability distributions, not promises — the shaded band is
   where the eruption actually lands 50% and 90% of the time, backtested against
   history. Times are park time (America/Denver).<br><br>
+  <a href="/method">Method: how every prediction here is made, tested, and where it is
+  wrong →</a> — the models, their walk-forward scores, the results that did not work,
+  and the known gaps in each geyser's own forecast.<br><br>
+  Saw a card get it badly wrong while you were standing there? That is the most useful
+  thing anyone can send us — <a href="/method#contact">tell us what happened →</a>.
+  No account needed.<br><br>
   Eruption data from <a href="https://geysertimes.org">GeyserTimes.org</a> and its
   volunteer observers. This is an independent open-source project.
 </footer>
@@ -725,8 +757,89 @@ function whyPanel(p){
 
   const d = document.createElement("details");
   d.className = "why";
+  d.dataset.panel = "why";
   d.innerHTML = `<summary>why this time?</summary>${parts.join("")}`;
   return d;
+}
+
+/* ── "how this is modelled" ────────────────────────────────
+   The second disclosure, and the one a gazer who wants to argue with a card
+   needs: which model serves this geyser, what it actually scored in the
+   walk-forward backtest, what that becomes once the intervals the validity
+   filter rejects are counted too, and what this particular forecast is known
+   to get wrong. Everything comes from /api/method -- a static read of the
+   committed backtest artifact -- so it can neither slow the page down nor
+   disagree with the full write-up it links to. */
+let methodDoc = null;                      // {geyser: block}, once loaded
+
+const mpct = x => x == null ? "—" : Math.round(x * 100) + "%";
+// One decimal, as the calibration report prints it, so a number read off a
+// card matches the number in the report and on /method.
+const mnum = x => x == null ? "—" : (Math.abs(x) >= 1000 ? String(Math.round(x)) : x.toFixed(1));
+const escText = s => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const mrich = s => escText(s)
+  .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+  .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+  .replace(/`([^`]+)`/g, "<code>$1</code>");
+
+function methodPanel(geyser){
+  const g = methodDoc && methodDoc[geyser];
+  if (!g) return null;
+  const parts = [];
+  const s = g.served;
+
+  if (s){
+    const off = (v, nominal) => Math.abs(v - nominal) > 0.07 ? " off" : "";
+    parts.push(`<p>Served by <code>${escText(s.model)}</code> — ${mrich(s.what)}</p>`);
+    if (!s.pinned && s.winner_ahead_pct > 0){
+      parts.push(`<p class="aside">The backtest's own winner here was `
+        + `<code>${escText(g.best.model)}</code>, ahead by ${s.winner_ahead_pct}% — inside the `
+        + `margin this project treats as noise, so nothing is pinned.</p>`);
+    }
+    parts.push(`<div class="mstats">`
+      + `<div class="mstat"><b>typical miss</b><span>${mnum(s.metrics.mae)} min</span></div>`
+      + `<div class="mstat"><b>CRPS</b><span>${mnum(s.metrics.crps)} min</span></div>`
+      + `<div class="mstat${off(s.metrics.cov50, 0.5)}"><b>50% band holds</b>`
+      + `<span>${mpct(s.metrics.cov50)}</span></div>`
+      + `<div class="mstat${off(s.metrics.cov90, 0.9)}"><b>90% band holds</b>`
+      + `<span>${mpct(s.metrics.cov90)}</span></div>`
+      + `</div>`);
+    parts.push(`<p class="aside">Walk-forward over ${s.metrics.n.toLocaleString()} past `
+      + `eruptions, every model scored on the same ones.</p>`);
+  } else if (g.why){
+    parts.push(`<p>${mrich(g.why)}</p>`);
+  }
+
+  if (g.honest){
+    parts.push(`<p class="aside">Against <b>every</b> raw gap — including the ${
+      g.honest.pct_rejected.toFixed(1)}% the validity filter rejects as probable missed `
+      + `eruptions — the `
+      + `90% band holds ${mpct(g.honest.cov90)} rather than ${mpct(g.honest.cov90_filtered)}. `
+      + `That gap is observation, not modelling.</p>`);
+  }
+
+  if (g.gaps && g.gaps.length){
+    parts.push(`<ul class="mgaps">`
+      + g.gaps.slice(0, 2).map(x => `<li>${mrich(x)}</li>`).join("") + `</ul>`);
+  }
+  parts.push(`<a class="more" href="/method#${escText(g.slug)}">`
+    + `full working for ${escText(geyser)} →</a>`);
+
+  const d = document.createElement("details");
+  d.className = "why";
+  d.dataset.panel = "method";
+  d.innerHTML = `<summary>how this is modelled</summary>${parts.join("")}`;
+  return d;
+}
+
+/* Additive by construction: if this endpoint is missing or slow the cards are
+   exactly as they were, minus one disclosure nobody has opened yet. */
+function loadMethod(){
+  return fetchJson("/api/method").then(doc => {
+    methodDoc = Object.fromEntries((doc.geysers || []).map(g => [g.geyser, g]));
+    if (lastData) renderCards(lastData);
+  }).catch(() => {});
 }
 
 /* Steamboat's seismic watch line. Every mode states its reason; a
@@ -790,6 +903,8 @@ function card(p){
     c.className = "chip"; c.textContent = "world's tallest · context only";
     chips.appendChild(c);
     el.appendChild(chips);
+    const how = methodPanel(p.geyser);
+    if (how) el.appendChild(how);
     return el;
   }
 
@@ -816,6 +931,8 @@ function card(p){
     chips.appendChild(c);
     el.appendChild(chips);
     el.appendChild(whyPanel(p));
+    const howPlanning = methodPanel(p.geyser);
+    if (howPlanning) el.appendChild(howPlanning);
     return el;
   }
 
@@ -880,6 +997,8 @@ function card(p){
     el.appendChild(d);
   });
   el.appendChild(whyPanel(p));
+  const how = methodPanel(p.geyser);
+  if (how) el.appendChild(how);
   return el;
 }
 
@@ -909,16 +1028,20 @@ function renderParkSignals(items){
 
 function renderCards(pr){
   const cards = document.getElementById("cards");
-  // The re-render replaces every card; an open "why this time?" panel must
-  // survive it or reading gets interrupted mid-sentence.
-  const openWhy = new Set(
-    [...cards.querySelectorAll("details.why[open]")].map(d => d.closest("article")?.dataset.geyser)
+  // The re-render replaces every card; an open panel must survive it or reading
+  // gets interrupted mid-sentence. Keyed by geyser AND panel, because a card
+  // now carries two of them and reopening the wrong one is worse than none.
+  const open = new Set(
+    [...cards.querySelectorAll("details.why[open]")].map(
+      d => `${d.closest("article")?.dataset.geyser}|${d.dataset.panel}`)
   );
   cards.innerHTML = "";
   pr.predictions.forEach(p => {
     const el = card(p);
     el.dataset.geyser = p.geyser;
-    if (openWhy.has(p.geyser)) el.querySelector("details.why")?.setAttribute("open", "");
+    el.querySelectorAll("details.why").forEach(d => {
+      if (open.has(`${p.geyser}|${d.dataset.panel}`)) d.setAttribute("open", "");
+    });
     cards.appendChild(el);
   });
 }
@@ -1521,7 +1644,10 @@ document.getElementById("theme").addEventListener("click", () => {
 });
 
 /* The scoreboard is fetched alongside the predictions but never through them:
-   if the scoring endpoints are missing or broken the cards still render. */
+   if the scoring endpoints are missing or broken the cards still render. The
+   method document is fetched once and never again -- it only changes when a
+   new backtest is deployed, so re-pulling it every five minutes would be
+   asking a question whose answer cannot have changed. */
 function refresh(){ load(); loadScored(); }
 
 parkClock();
@@ -1529,6 +1655,7 @@ setInterval(parkClock, 1000);
 setInterval(renderAxis, 60000);
 setInterval(() => { if (lastData) renderCards(lastData); }, 60000);
 refresh();
+loadMethod();
 setInterval(refresh, REFRESH_MS);
 </script>
 </body>

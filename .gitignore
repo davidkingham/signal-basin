@@ -23,6 +23,10 @@ dist/
 .idea/
 .vscode/
 
+# Local secrets for `wrangler dev` and `wrangler types`. The real values
+# live in `wrangler secret put`; this file must never be committed.
+.dev.vars
+
 # Wrangler / Cloudflare local state
 .wrangler/
 node_modules/

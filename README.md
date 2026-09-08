@@ -22,9 +22,12 @@ names no time because nobody honestly can. On top of the interval models:
 Beehive's Indicator nowcast, live precursor signal notes that print their own
 measured hit rates, and a validated season-aware seismic watch on Steamboat
 via the Norris seismometer. Every card explains its own reasoning ("why this
-time?"), and a public scoreboard scores every prediction against the NPS and
-Geysers.net over the identical window, with the record starting 2026-08-09 —
-the day the calibrated system went live. See
+time?") and, one tap further, the model serving it with its backtest scores and
+its known gaps ("how this is modelled") — with the full working, per geyser,
+at [signalbasin.org/method](https://signalbasin.org/method). A public scoreboard
+scores every prediction against the NPS and Geysers.net over the identical
+window, with the record starting 2026-08-09 — the day the calibrated system went
+live. See
 [`reports/calibration_report.md`](reports/calibration_report.md) for the full
 metrics table and [`docs/findings/`](docs/findings/README.md) for everything
 learned along the way, negative results included.
@@ -45,6 +48,7 @@ uv sync
 uv run geyser-ai ingest
 
 # Walk-forward backtest -> reports/calibration_report.md + reports/figures/
+# and src/geyser_ai/calibration.json, which is what the live /method page reads
 uv run geyser-ai backtest
 uv run geyser-ai backtest --geyser "Old Faithful" --years 5
 
@@ -114,8 +118,10 @@ The durable write-up of everything this project has learned — including the
 negative results, the external-forcings literature, and the deployment gotchas —
 lives in [`docs/findings/`](docs/findings/README.md).
 
-Best model per geyser, walk-forward over the last 3 years (CRPS in minutes, lower
-is better):
+The walk-forward **winner** per geyser over the last 3 years (CRPS in minutes,
+lower is better). What each geyser is actually *served* by is a separate
+question, answered below and, per geyser with the numbers beside it, at
+[signalbasin.org/method](https://signalbasin.org/method):
 
 | Geyser | Best model | CRPS | MAE | 50% cov | 90% cov |
 |---|---|---:|---:|---:|---:|
@@ -138,14 +144,20 @@ fresher than the geyser's measured phase window (Lone Star ~7.7 h, Till ~4
 days); otherwise the dashboard shows a planning card with interval statistics
 and the decision rule a visitor can actually use.
 
-**Each geyser is served by the model in that table**, not by a single global
-default — see `models.BEST_MODEL_BY_GEYSER`. That distinction is only load-bearing
-for the three geysers whose process has real state: the two with a minor mode,
-where conditioning on it roughly halves CRPS (Old Faithful 8.9 → 4.7, Castle
-173.0 → 77.6 against `best_parametric`), and Lion, where the series model takes
-15% off. On the other six the winner beats `best_parametric` by 0.2–5.5%, which
-is inside the noise, so they keep the default rather than pinning a choice on a
-coin flip.
+**A geyser is served by the winner above only where the margin is decisive** —
+see `models.BEST_MODEL_BY_GEYSER`, which pins four: the two with a real minor
+mode, where conditioning on it roughly halves CRPS (Old Faithful 8.9 → 4.7,
+Castle 173.0 → 77.6 against `best_parametric`); Lion, where the series model
+takes 15% off; and Till, whose drifted cycle costs the long-window parametric
+fits 57%. Everything else keeps the default `best_parametric`, because there the
+winner is ahead by only 0.2–5.6% — inside run-to-run noise, and pinning a
+production choice on it would be overfitting the leaderboard rather than
+improving the forecast.
+
+That means the served model is *not* the top row on nine of thirteen geysers,
+and the difference is published rather than smoothed over: each card's "how this
+is modelled" panel names the model it actually runs, its own scores, and how far
+ahead the leaderboard winner was.
 
 ### What actually moved the numbers
 
@@ -366,6 +378,10 @@ single-page dashboard. Interactive API docs are at `/docs`.
 | `GET /api/stats?geyser=Grand` | Interval statistics per geyser |
 | `GET /api/scoreboard?days=30` | Rolling accuracy per geyser for this project, the NPS and Geysers.net |
 | `GET /api/comparisons/recent?limit=20` | Recent eruptions with each source's prediction beside the actual |
+| `GET /method` | The methodology page: how predictions are made, tested, and where they fail |
+| `GET /api/method` | The same document as JSON — sections, model roster, per-geyser working, known gaps |
+| `GET /api/method/{geyser}` | One geyser's working: served model, full leaderboard, honest coverage, its gaps |
+| `POST /api/contact` | A correction from a reader, mailed on via Postmark. **Answered by the Worker, never the container** |
 | `GET /api/health` | Snapshot age, row counts, sync state |
 
 **Freshness.** The archive snapshot is downloaded once and never re-fetched
@@ -398,6 +414,71 @@ The design is deliberate rather than templated:
   five-minute auto-refresh.
 - The community's `wc` / `ie` / `E` shorthand survives as chips — a nod to the
   classic chat.geysertimes.org dashboard that gazers already know.
+- **The reasoning is one tap away and nothing more.** Each card carries two
+  collapsed panels — "why this time?", which restates the values this particular
+  forecast was computed from, and "how this is modelled", which names the served
+  model, its walk-forward scores, what those become once the filter-rejected
+  intervals are counted, and what this forecast is known to get wrong. Both are
+  shut by default: the page is for reading a countdown, and the working is for
+  arguing with it.
+
+### Show your work: `/method`
+
+A gazer wants a time. A researcher wants to know whether to believe it, and
+where to push. [signalbasin.org/method](https://signalbasin.org/method) is the
+second audience's page, linked from every card and shareable on its own: the
+seven-step path from an anchor eruption to a rendered band, the validity
+filter's six generations with the numbers each one moved, the backtest protocol
+and what its metrics mean, honest coverage across the whole roster, every
+negative result at the same length as the wins, and then one block per geyser —
+the model that serves it and why, every model scored on the same eruptions, its
+entry-type provenance, and its own known gaps. It ends with the open problems in
+priority order, addressed to the people who could actually solve them.
+
+### Corrections from people without a GitHub account
+
+Almost no gazer has one, and the page exists to be told where it is wrong — so it
+ends in a form, and each geyser's block carries a *"saw this card get it wrong?"*
+link that lands on the form with that geyser already chosen.
+
+`POST /api/contact` is answered **in the Worker**, for the same reason the R2
+credentials are: the container image holds no secrets and one baked into it would
+travel with every image push. Both `POSTMARK_TOKEN` and `CONTACT_TO` are Worker
+secrets — the destination address included, so it never appears in a public
+repository — and `wrangler types` picks them up from a gitignored `.dev.vars`, so
+`Env` stays generated rather than hand-written.
+
+It sends mail on someone else's quota from an unauthenticated request, so it is
+deliberately dull to abuse: a honeypot field, a three-second minimum dwell time,
+10–4000 character bounds, a 16 KB body cap checked before the body is read, and a
+per-sender allowance of 3/hour and 10/day held in the Durable Object storage that
+already exists. Addresses are hashed before they reach storage — rate limiting
+needs to tell senders apart, not know who they are — and the whole log is one key,
+pruned to 24 hours on every write, with a 500/day site-wide backstop. A honeypot
+hit answers exactly like a success, because a bot that learns which field betrayed
+it simply stops filling that field in.
+
+To set it up:
+
+```bash
+npx wrangler secret put POSTMARK_TOKEN   # Postmark server token
+npx wrangler secret put CONTACT_TO       # where corrections should land
+```
+
+The From address is `no-reply@signalbasin.org`, which needs a verified Sender
+Signature or a verified domain in Postmark; the sender's own address, when they
+give one, becomes `Reply-To`.
+
+Two rules keep it from becoming marketing. Prose is curated in `method.py`;
+**numbers are never typed by hand** — they are read from `calibration.json`,
+which the backtest writes, and derived facts (which model serves, how far behind
+the winner it is, whether a nominal interval is miscalibrated) are computed from
+that artifact and from `models.BEST_MODEL_BY_GEYSER`. `tests/test_method.py`
+asserts the artifact against the published report row by row, asserts the page
+names the model production actually runs, and fails if a margin the page calls
+"noise" stops being noise. The endpoint touches no database, so it answers in a
+millisecond and keeps answering while a cold container is still pulling its
+snapshot.
 
 ### MCP server
 

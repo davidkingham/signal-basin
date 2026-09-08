@@ -169,6 +169,28 @@ First build: **3.63 GB**, over `basic`'s 4 GB instance disk. Two causes:
 Final: **1.38 GB**. Note `uv sync` installs the project **editable**, so the
 runtime stage must copy `src/` as well as the venv.
 
+## Anything the site must serve has to live in `src/`
+
+`.dockerignore` excludes `data/`, `reports/`, `docs/` and `tests/` — the image
+carries code only. That is right, and it has one consequence worth stating
+plainly: **a file the running service needs to read cannot live in `reports/` or
+`docs/`.**
+
+This bit when the `/method` page was built (2026-08-17). Its numbers have to be
+the backtest's own numbers, and the backtest writes `reports/calibration_report.md`,
+which production cannot see. The fix is `src/geyser_ai/calibration.json`, written
+by `report.write_calibration_json()` in the same pass that writes the markdown,
+committed to the repository like any other served asset, and cross-checked
+against the published markdown row by row in `tests/test_method.py`. Both come
+out of one backtest run, so they cannot disagree; if somebody regenerates one and
+not the other, the test says so.
+
+The related discipline: `/api/method` touches **no database at all**. It is a
+read of that committed artifact plus curated prose, so it answers in about a
+millisecond, it is cacheable for an hour at the Worker, and — the property that
+actually matters — it still answers while a cold container is downloading its
+200 MB snapshot and every other endpoint is returning 503.
+
 ## Snapshot changes are not live until the snapshot is republished
 
 The container reads `intervals` from the DuckDB snapshot in R2. A change to the

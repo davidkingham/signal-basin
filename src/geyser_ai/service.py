@@ -15,6 +15,8 @@ import pandas as pd
 
 from .config import DB_PATH, TARGET_GEYSERS
 from .ledger import get_ledger
+from .method import METHODOLOGY
+from .method import get_method as method_doc
 from .models import Prediction, SamplePrediction
 from .predict import predict_geyser
 from .scoring import Eruption, LoggedPrediction, match_and_score
@@ -454,22 +456,14 @@ def get_geyser_stats(geyser: str | None = None, db_path=DB_PATH) -> dict[str, An
     return {"stats": rows}
 
 
-METHODOLOGY = (
-    "GeyserTimes publishes only the predictions that are open right now -- there is no "
-    "historical predictions endpoint and none in the nightly archive -- so every number here "
-    "was accumulated prospectively, from the moment logging started. "
-    "Each source is scored against the window it states itself: the National Park Service and "
-    "Geysers.net publish an explicit window with every prediction, and this project's stated "
-    "window is its nominal 90% interval. In-window rate is therefore only meaningful beside the "
-    "median window width, which is why both are always shown. "
-    "When a source re-predicts, only the last prediction issued before the eruption is scored; "
-    "the ones it replaced are discarded rather than counted as misses. "
-    "Coverage is the share of scored eruptions for which this source had a prediction open, out "
-    "of the eruptions any source predicted. "
-    "Eruptions that land more than three window widths past a prediction are dropped for every "
-    "source alike: in crowd-sourced data that usually means an eruption went unlogged in "
-    "between, and charging that to the forecaster would be measuring the observers instead."
-)
+def get_method(geyser: str | None = None) -> dict[str, Any]:
+    """The methodology behind the predictions, whole or for one geyser.
+
+    A pure read of `method.py` and the committed calibration artifact -- no
+    database, no clock, no network -- so the "show your work" page cannot be
+    slowed down or broken by anything the prediction path is doing.
+    """
+    return method_doc(geyser)
 
 
 def _our_key(pred: dict[str, Any], predicted_epoch: int) -> str:

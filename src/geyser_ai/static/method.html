@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Method — Signal Basin</title>
+<meta name="description" content="How Signal Basin's Yellowstone geyser predictions are made, how they were tested, what they score, and where they are wrong — the full working, per geyser, including the negative results.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>♨️</text></svg>">
+<meta name="color-scheme" content="light dark">
+<style>
+/* ─────────────────────────────────────────────────────────────
+   Same palette as the dashboard: this is the same instrument,
+   opened up. Teal is the sequential hue, thermophile orange is
+   reserved (here, for the gaps — the thing the page is for).
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --pool-900:#04252b; --pool-700:#0a4a55; --pool-500:#0d6b78;
+  --pool-300:#22b8c4; --pool-100:#bfe6ea;
+  --mat:#d9541f;
+  --amber:#b8791a;
+
+  --surface:#f4f1e9;
+  --card:#fffefa;
+  --line:#ddd7c9;
+  --ink:#12211f;
+  --ink-2:#4a5a57;
+  --ink-3:#7c8a86;
+  --brand:#0d6b78;
+
+  --band-50:rgba(13,107,120,.28);
+  --band-90:rgba(13,107,120,.13);
+
+  --r:14px;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+:root[data-theme=light]{color-scheme:light}
+:root[data-theme=dark]{color-scheme:dark}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme=light]){
+    --surface:#04252b; --card:#0a3138; --line:#12454e;
+    --ink:#eaf6f6; --ink-2:#a8c6c8; --ink-3:#6f9298;
+    --pool-300:#3fd0da; --brand:#3fd0da;
+    --band-50:rgba(63,208,218,.26); --band-90:rgba(63,208,218,.13);
+    --mat:#ff7a45; --amber:#e0a33c;
+  }
+}
+:root[data-theme=dark]{
+  --surface:#04252b; --card:#0a3138; --line:#12454e;
+  --ink:#eaf6f6; --ink-2:#a8c6c8; --ink-3:#6f9298;
+  --pool-300:#3fd0da; --brand:#3fd0da;
+  --band-50:rgba(63,208,218,.26); --band-90:rgba(63,208,218,.13);
+  --mat:#ff7a45; --amber:#e0a33c;
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){ html{scroll-behavior:auto} }
+html,body{margin:0;padding:0}
+body{
+  background:var(--surface); color:var(--ink);
+  font-family:var(--sans); font-size:15.5px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.wrap{max-width:720px;margin:0 auto;padding:0 16px}
+
+/* ── header ─────────────────────────────────────────────── */
+header{padding:22px 0 6px}
+.brand{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+h1{font-size:19px;font-weight:800;margin:0;letter-spacing:.14em;text-transform:uppercase}
+h1 a{color:inherit;text-decoration:none}
+h1 .ai{color:var(--brand)}
+.back{
+  font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+  color:var(--ink-3);text-decoration:none;white-space:nowrap;
+  border:1px solid var(--line);border-radius:99px;padding:4px 10px;
+}
+.back:hover{color:var(--brand);border-color:var(--brand)}
+.tagline{
+  font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--ink-3);margin:8px 0 4px;
+}
+.sub{
+  margin-top:6px;font-family:var(--mono);font-size:11.5px;
+  letter-spacing:.03em;color:var(--ink-3);
+  display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+}
+button.theme{
+  background:none;border:1px solid var(--line);color:var(--ink-3);
+  border-radius:99px;font-family:var(--mono);font-size:10.5px;
+  padding:3px 9px;cursor:pointer;letter-spacing:.08em;
+}
+button.theme:hover{color:var(--ink);border-color:var(--ink-3)}
+button.theme:focus-visible,a:focus-visible,summary:focus-visible{
+  outline:2px solid var(--pool-500);outline-offset:2px}
+
+/* ── lede + contents ────────────────────────────────────── */
+.lede{margin:16px 0 4px;font-size:16.5px;line-height:1.6;color:var(--ink-2)}
+.lede p:first-child{color:var(--ink)}
+.toc{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px 14px;margin:18px 0 6px;
+}
+.toc-lab{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:7px}
+.toc ol{margin:0;padding:0;list-style:none;
+  display:flex;flex-wrap:wrap;gap:5px 7px;counter-reset:toc}
+.toc a{
+  display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.03em;
+  color:var(--ink-2);text-decoration:none;border:1px solid var(--line);
+  border-radius:99px;padding:3.5px 10px;
+}
+.toc a:hover{color:var(--brand);border-color:var(--brand)}
+
+/* ── sections ───────────────────────────────────────────── */
+section{margin:34px 0}
+h2{
+  font-size:12px;font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-3);margin:0 0 4px;font-weight:600;
+}
+h3.title{font-size:20px;line-height:1.28;margin:0 0 10px;letter-spacing:-.01em}
+p{margin:0 0 12px}
+.section-lede{color:var(--ink-2);border-left:2px solid var(--pool-300);
+  padding-left:12px;margin-bottom:14px}
+b,strong{font-weight:700;color:var(--ink)}
+code{font-family:var(--mono);font-size:.88em;background:var(--band-90);
+  padding:1px 5px;border-radius:4px;color:var(--ink-2)}
+a{color:var(--brand)}
+
+/* numbered steps: the pipeline, and the filter's generations */
+ol.steps{list-style:none;counter-reset:step;margin:0;padding:0}
+ol.steps li{counter-increment:step;position:relative;padding:0 0 14px 40px}
+ol.steps li::before{
+  content:counter(step);position:absolute;left:0;top:1px;
+  width:26px;height:26px;border-radius:50%;
+  display:grid;place-items:center;
+  font-family:var(--mono);font-size:11.5px;font-weight:700;
+  color:var(--brand);border:1px solid var(--line);background:var(--card);
+}
+ol.steps li::after{
+  content:"";position:absolute;left:13px;top:29px;bottom:2px;width:1px;background:var(--line);
+}
+ol.steps li:last-child{padding-bottom:0}
+ol.steps li:last-child::after{display:none}
+ol.steps .st{font-weight:700;display:block;margin-bottom:2px}
+ol.steps p{margin:0;color:var(--ink-2);font-size:14.5px}
+
+/* a plain finding block: negative results, open gaps */
+.block{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:13px 15px;margin:9px 0}
+.block h4{margin:0 0 5px;font-size:15px;line-height:1.35}
+.block p{margin:0;color:var(--ink-2);font-size:14.5px}
+.block .who{font-family:var(--mono);font-size:10px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--brand);display:block;margin-bottom:4px}
+.block.gap{border-left:3px solid var(--mat)}
+
+/* ── tables ─────────────────────────────────────────────── */
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:10px 0 6px;
+  border:1px solid var(--line);border-radius:var(--r);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 11px;text-align:left;white-space:nowrap}
+th{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:600;border-bottom:1px solid var(--line)}
+td{border-top:1px solid var(--line);color:var(--ink-2)}
+tr:first-child td{border-top:none}
+td.num,th.num{text-align:right;font-family:var(--mono);
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+td.name{font-family:var(--mono);font-size:12px}
+tr.served td{background:var(--band-90)}
+tr.served td.name{font-weight:700;color:var(--ink)}
+td .tag{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid var(--brand);color:var(--brand);border-radius:99px;padding:1px 6px;
+  margin-left:6px}
+td.warn{color:var(--amber)}
+/* Table notes live *below* the scroll container rather than inside it: a
+   caption trapped in an overflow box has to be scrolled to be read, and a
+   caption is the part that says what the numbers mean. */
+p.cap{font-size:11.5px;color:var(--ink-3);line-height:1.5;margin:-2px 0 12px;padding:0 2px}
+
+/* ── per-geyser blocks ──────────────────────────────────── */
+details.g{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  margin:8px 0;overflow:hidden}
+details.g[open]{border-color:var(--pool-300)}
+details.g > summary{
+  cursor:pointer;list-style:none;user-select:none;padding:11px 14px;
+  display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;
+}
+details.g > summary::-webkit-details-marker{display:none}
+details.g > summary::before{content:"▸";color:var(--ink-3);font-size:11px;flex:none}
+details.g[open] > summary::before{content:"▾";color:var(--brand)}
+.g-name{font-size:14.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase}
+.g-serves{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.g-crps{margin-left:auto;font-family:var(--mono);font-size:11.5px;
+  font-variant-numeric:tabular-nums;color:var(--ink-2);white-space:nowrap}
+.g-body{padding:2px 14px 14px;border-top:1px solid var(--line)}
+.g-body h5{margin:16px 0 5px;font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.g-body p{font-size:14.5px;color:var(--ink-2)}
+.g-sum{margin-top:12px;font-size:15px;color:var(--ink)}
+.chip{font-family:var(--mono);font-size:9px;letter-spacing:.09em;text-transform:uppercase;
+  border:1px solid var(--line);color:var(--ink-3);padding:1.5px 7px;border-radius:99px}
+.chip.pin{border-color:var(--brand);color:var(--brand)}
+.chip.mode{border-color:var(--amber);color:var(--amber)}
+
+/* the served-model stat row */
+.stats{display:flex;flex-wrap:wrap;gap:9px;margin:8px 0 2px}
+.stat{border:1px solid var(--line);border-radius:9px;padding:6px 10px;min-width:84px}
+.stat b{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.stat span{font-family:var(--mono);font-size:15px;font-variant-numeric:tabular-nums;
+  color:var(--ink)}
+.stat i{font-style:normal;font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+.stat.off span{color:var(--amber)}
+
+/* gaps: the reason this page exists, so they wear the warm accent */
+ul.gaps{margin:6px 0 0;padding:0;list-style:none}
+ul.gaps li{position:relative;padding:0 0 9px 16px;font-size:14.5px;color:var(--ink-2)}
+ul.gaps li::before{content:"";position:absolute;left:0;top:9px;width:6px;height:6px;
+  border-radius:50%;background:var(--mat)}
+
+/* ── corrections form ───────────────────────────────────────
+   This page spends its length arguing that the forecasts are
+   wrong in specific places. This is where somebody who was
+   standing there gets to say so — without needing a GitHub
+   account, which almost no gazer has.
+   ───────────────────────────────────────────────────────── */
+form.contact{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px 15px;margin:10px 0}
+.f-row{margin-bottom:12px}
+.f-row label{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:4px;font-weight:600}
+.f-row input,.f-row select,.f-row textarea{
+  width:100%;font-family:var(--sans);font-size:15px;color:var(--ink);
+  background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+}
+.f-row textarea{min-height:132px;resize:vertical;line-height:1.5}
+.f-row input:focus,.f-row select:focus,.f-row textarea:focus{
+  outline:2px solid var(--pool-500);outline-offset:1px;border-color:var(--brand)}
+.f-hint{font-size:11.5px;color:var(--ink-3);margin-top:4px}
+/* Off-screen rather than display:none — the field has to look real to a bot. */
+.f-hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.f-foot{display:flex;align-items:center;gap:13px;flex-wrap:wrap}
+.f-send{font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+  background:var(--brand);color:var(--card);border:1px solid var(--brand);
+  border-radius:99px;padding:8px 18px;cursor:pointer}
+.f-send:hover:not(:disabled){filter:brightness(1.08)}
+.f-send:disabled{opacity:.5;cursor:default}
+.f-status{font-size:13.5px;line-height:1.5;flex:1 1 14ch}
+.f-status.ok{color:var(--brand);font-weight:600}
+.f-status.bad{color:var(--mat)}
+
+.note{font-size:12.5px;color:var(--ink-3);line-height:1.55;margin:10px 0}
+footer{padding:26px 0 34px;font-size:12px;color:var(--ink-3);line-height:1.65;
+  border-top:1px solid var(--line);margin-top:34px}
+footer a{color:var(--ink-2)}
+.err{background:var(--card);border:1px solid var(--mat);border-radius:var(--r);
+  padding:12px 14px;color:var(--mat);font-size:13.5px;margin:14px 0}
+.skel{opacity:.4}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="brand">
+    <h1><a href="/">Signal<span class="ai"> Basin</span></a></h1>
+    <a class="back" href="/">← predictions</a>
+  </div>
+  <div class="tagline">Method — show your work</div>
+  <div class="sub">
+    <span id="stamp">loading…</span>
+    <button class="theme" id="theme" type="button">theme</button>
+  </div>
+</header>
+
+<main id="doc">
+  <div class="skel"><p>Loading the method…</p></div>
+</main>
+
+<footer>
+  Eruption data from <a href="https://geysertimes.org">GeyserTimes.org</a> and the volunteer
+  observers who record every entry. Signal Basin is an independent, non-commercial,
+  open-source project and is not affiliated with the National Park Service or GeyserTimes.<br><br>
+  Predictions are probability distributions, not promises. Times on the dashboard are park
+  time (America/Denver).
+</footer>
+
+</div>
+<script>
+/* ─────────────────────────────────────────────────────────────
+   Everything on this page is rendered from /api/method, which is
+   a static read of the committed calibration artifact plus the
+   curated prose. No database, no clock: it answers instantly and
+   keeps answering while the prediction service is busy.
+   ───────────────────────────────────────────────────────────── */
+
+const esc = s => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+/* The prose carries **bold** and `code`, because it is also read as plain text
+   through the JSON API and in the source. Escape first, then mark up, so no
+   author of a finding can inject markup by accident. */
+function rich(s){
+  return esc(s)
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+
+const paras = arr => (arr || []).map(p => `<p>${rich(p)}</p>`).join("");
+const pct  = x => x == null ? "—" : Math.round(x * 100) + "%";
+/* One decimal, the way the calibration report prints it, so a number copied
+   off this page matches the number in the report it came from. */
+const mins = x => x == null ? "—" : (Math.abs(x) >= 1000 ? String(Math.round(x)) : x.toFixed(1));
+/* A paired delta of −0.04% is not "0%", it is "no measurable change", and the
+   difference matters on a table whose whole purpose is a paired comparison. */
+const delta = x => Math.abs(x) < 0.05 ? "±0.0%"
+  : (x > 0 ? "+" + x.toFixed(1) : "−" + Math.abs(x).toFixed(1)) + "%";
+const int  = n => n == null ? "—" : Number(n).toLocaleString();
+
+/* ── generic section rendering ──────────────────────────── */
+function renderSection(s, doc){
+  let h = `<section id="${esc(s.id)}"><h2>${esc(s.eyebrow || s.id)}</h2>`
+        + `<h3 class="title">${esc(s.title)}</h3>`;
+  if (s.lede) h += `<div class="section-lede">${rich(s.lede)}</div>`;
+  h += paras(s.body);
+
+  if (s.steps){
+    h += `<ol class="steps">` + s.steps.map(st =>
+      `<li><span class="st">${esc(st.title)}</span><p>${rich(st.text)}</p></li>`).join("")
+      + `</ol>`;
+  }
+  if (s.generations){
+    h += `<ol class="steps">` + s.generations.map(g =>
+      `<li><span class="st">${esc(g.title)}</span><p>${rich(g.text)}</p></li>`).join("")
+      + `</ol>`;
+  }
+  if (s.metrics){
+    h += `<div class="tw"><table><thead><tr><th>Metric</th><th>Units</th>`
+       + `<th>What it means</th></tr></thead><tbody>`
+       + s.metrics.map(m => `<tr><td class="name">${esc(m.name)}</td>`
+         + `<td>${esc(m.unit)}</td><td style="white-space:normal">${rich(m.text)}</td></tr>`).join("")
+       + `</tbody></table></div>`;
+  }
+  if (s.signals){
+    h += `<div class="tw"><table><thead><tr><th>Signal</th><th>Geyser</th>`
+       + `<th>Measured</th><th>How it is used</th></tr></thead><tbody>`
+       + s.signals.map(x => `<tr><td class="name">${esc(x.signal)}</td>`
+         + `<td>${esc(x.target)}</td><td class="num">${esc(x.measured)}</td>`
+         + `<td style="white-space:normal">${rich(x.role)}</td></tr>`).join("")
+       + `</tbody></table></div><p class="cap">Every rate is measured on the archive and `
+       + `printed on the card that carries it. A signal that cannot state its own hit rate `
+       + `does not appear on the dashboard.</p>`;
+  }
+  if (s.items){
+    h += s.items.map(it => `<div class="block"><h4>${esc(it.title)}</h4>`
+      + `<p>${rich(it.text)}</p></div>`).join("");
+  }
+  // Section-specific tables, drawn from the same payload the cards use.
+  if (s.id === "choice")     h += modelRoster(doc);
+  if (s.id === "honest")     h += honestTable(doc);
+  if (s.id === "neighbours") h += nowcastTable(doc);
+  if (s.closing)             h += `<p>${rich(s.closing)}</p>`;
+  return h + `</section>`;
+}
+
+/* ── the model roster ───────────────────────────────────── */
+function modelRoster(doc){
+  const served = {};
+  doc.geysers.forEach(g => {
+    if (g.served) (served[g.served.model] = served[g.served.model] || []).push(g.geyser);
+  });
+  return `<h2 style="margin-top:22px">The roster</h2>`
+    + `<div class="tw"><table><thead><tr><th>Model</th><th>What it is</th>`
+    + `<th>Serves</th></tr></thead><tbody>`
+    + Object.entries(doc.models).map(([key, m]) => `<tr>`
+        + `<td class="name">${esc(key)}</td>`
+        + `<td style="white-space:normal">${rich(m.what)}</td>`
+        + `<td style="white-space:normal">${served[key]
+            ? esc(served[key].join(", ")) : "<i>comparison only</i>"}</td></tr>`).join("")
+    + `</tbody></table></div><p class="cap">Every model in the roster is scored on every `
+    + `geyser at each backtest, including the ones that never win. Models nothing serves are `
+    + `kept so the negative result stays reproducible.</p>`;
+}
+
+/* ── honest coverage, whole roster on one table ─────────── */
+function honestTable(doc){
+  const rows = doc.geysers.filter(g => g.honest);
+  if (!rows.length) return "";
+  return `<div class="tw"><table><thead><tr><th>Geyser</th>`
+    + `<th class="num">n</th><th class="num">gaps rejected</th>`
+    + `<th class="num">honest 50%</th><th class="num">honest 90%</th>`
+    + `<th class="num">filtered 90%</th><th class="num">cost</th></tr></thead><tbody>`
+    + rows.map(g => {
+        const h = g.honest;
+        return `<tr><td><a href="#${esc(g.slug)}">${esc(g.geyser)}</a></td>`
+          + `<td class="num">${int(h.n)}</td>`
+          + `<td class="num">${h.pct_rejected.toFixed(1)}%</td>`
+          + `<td class="num">${pct(h.cov50)}</td>`
+          + `<td class="num${h.cov90 < 0.7 ? " warn" : ""}">${pct(h.cov90)}</td>`
+          + `<td class="num">${pct(h.cov90_filtered)}</td>`
+          + `<td class="num">−${Math.round(h.cost_points)} pts</td></tr>`;
+      }).join("")
+    + `</tbody></table></div><p class="cap">“Honest” columns score a plain rolling lognormal `
+    + `against every raw gap, including the ones the validity filter rejects; “filtered 90%” `
+    + `is the same model scored the way the headline table does it. The last column is what `
+    + `observation gaps cost, in coverage points. Where it is large, the fix is more eyes `
+    + `rather than a better model.</p>`;
+}
+
+/* ── neighbour conditioning, on/off, per regime ───────────
+   One row builder, used both for the whole-project table in the section above
+   and for the single-geyser version inside a card's block, so a regime cannot
+   be described two different ways on one page.                                */
+const NOWCAST_CAPTION =
+  `Each decision time is scored twice, identically, with neighbour conditioning on and off; `
+  + `only the paired difference means anything, because the conditioned moments are not a `
+  + `random sample of time. The highlighted row is the whole case for neighbour conditioning `
+  + `— and the Grand rows are the whole case against it.`;
+
+function nowcastFlatten(nc, geyser){
+  const rows = [];
+  if (nc.overall) rows.push({geyser, regime: "overall", ...nc.overall});
+  Object.entries(nc.by_regime || {}).forEach(([k, v]) => rows.push({geyser, regime: k, ...v}));
+  return rows;
+}
+
+function nowcastMarkup(rows, withGeyser, caption){
+  if (!rows.length) return "";
+  return `<div class="tw"><table><thead><tr>`
+    + (withGeyser ? `<th>Geyser</th>` : "")
+    + `<th>Regime</th><th class="num">n</th><th class="num">CRPS off</th>`
+    + `<th class="num">CRPS on</th><th class="num">Δ</th>`
+    + `<th class="num">90% off</th><th class="num">90% on</th></tr></thead><tbody>`
+    + rows.map(r => `<tr${r.delta_pct <= -10 ? ` class="served"` : ""}>`
+        + (withGeyser ? `<td>${esc(r.geyser)}</td>` : "")
+        + `<td class="name">${esc(r.regime)}</td>`
+        + `<td class="num">${int(r.n)}</td><td class="num">${mins(r.crps_off)}</td>`
+        + `<td class="num">${mins(r.crps_on)}</td>`
+        + `<td class="num">${delta(r.delta_pct)}</td>`
+        + `<td class="num">${pct(r.cov90_off)}</td><td class="num">${pct(r.cov90_on)}</td>`
+        + `</tr>`).join("")
+    + `</tbody></table></div><p class="cap">${caption}</p>`;
+}
+
+function nowcastTable(doc){
+  const rows = doc.geysers.flatMap(g => g.nowcast ? nowcastFlatten(g.nowcast, g.geyser) : []);
+  return nowcastMarkup(rows, true, NOWCAST_CAPTION);
+}
+
+function nowcastRows(nc, geyser){
+  return nowcastMarkup(nowcastFlatten(nc, geyser), false,
+    `Scored from decision times on a fixed 30-minute grid rather than from eruptions, with `
+    + `conditioning on and off at each of them. “off” is what this card would say without the `
+    + `neighbour; “on” is what it says with it.`);
+}
+
+/* ── one geyser's working ───────────────────────────────── */
+function leaderboard(g){
+  if (!g.leaderboard || !g.leaderboard.length) return "";
+  const servedName = g.served && g.served.model;
+  return `<div class="tw"><table><thead><tr><th>Model</th><th class="num">CRPS</th>`
+    + `<th class="num">MAE</th><th class="num">50% cov</th><th class="num">90% cov</th>`
+    + `</tr></thead><tbody>`
+    + g.leaderboard.map(r => `<tr${r.model === servedName ? ` class="served"` : ""}>`
+        + `<td class="name">${esc(r.model)}${r.model === servedName
+            ? `<span class="tag">served</span>` : ""}</td>`
+        + `<td class="num">${mins(r.crps)}</td><td class="num">${mins(r.mae)}</td>`
+        + `<td class="num">${pct(r.cov50)}</td><td class="num">${pct(r.cov90)}</td></tr>`).join("")
+    + `</tbody></table></div><p class="cap">Walk-forward over `
+    + `${esc(g.leaderboard[0].n.toLocaleString())} evaluations, every model on the same `
+    + `eruptions. CRPS and MAE in minutes, lower is better; coverage is best when it lands on `
+    + `its nominal 50% or 90%, in either direction.</p>`;
+}
+
+function servedStats(g){
+  const s = g.served;
+  if (!s) return "";
+  const m = s.metrics;
+  const cal = x => Math.abs(x[0] - x[1]) > 0.07 ? " off" : "";
+  return `<div class="stats">`
+    + `<div class="stat"><b>CRPS</b><span>${mins(m.crps)}</span> <i>min</i></div>`
+    + `<div class="stat"><b>typical miss</b><span>${mins(m.mae)}</span> <i>min</i></div>`
+    + `<div class="stat${cal([m.cov50, 0.50])}"><b>50% band holds</b><span>${pct(m.cov50)}</span>`
+    + ` <i>of the time</i></div>`
+    + `<div class="stat${cal([m.cov90, 0.90])}"><b>90% band holds</b><span>${pct(m.cov90)}</span>`
+    + ` <i>of the time</i></div>`
+    + `<div class="stat"><b>evaluations</b><span>${int(m.n)}</span></div>`
+    + `</div>`;
+}
+
+/* Why this model and not the leaderboard winner — stated, with the number. */
+function choiceLine(g, noise){
+  const s = g.served;
+  if (!s) return "";
+  const bits = [];
+  if (s.pinned){
+    bits.push(`Pinned to <code>${esc(s.model)}</code> in code because the margin is decisive `
+      + `rather than noisy — it is the walk-forward winner here.`);
+  } else if (s.winner_ahead_pct > 0){
+    bits.push(`Serves the default <code>${esc(s.model)}</code>. The walk-forward winner was `
+      + `<code>${esc(g.best.model)}</code>, ahead by <b>${s.winner_ahead_pct}%</b> — inside the `
+      + `${noise}% margin this project treats as run-to-run noise, so nothing is pinned. `
+      + `That difference is what the decision costs, and it is shown rather than hidden.`);
+  } else {
+    bits.push(`Serves the default <code>${esc(s.model)}</code>, which is also the walk-forward `
+      + `winner here.`);
+  }
+  if (s.beats_baseline_pct != null){
+    bits.push(s.beats_baseline_pct > 0
+      ? `It beats a plain rolling mean ± window — essentially what existing dashboards show — `
+        + `by <b>${s.beats_baseline_pct}%</b> CRPS.`
+      : s.beats_baseline_pct < 0
+        ? `On this geyser it scores <b>${Math.abs(s.beats_baseline_pct)}% worse</b> than a plain `
+          + `rolling mean ± window — essentially what existing dashboards show — which is inside `
+          + `the noise margin, but worth knowing before you trust it over the board at the `
+          + `visitor centre.`
+        : `It is level with a plain rolling mean ± window, which is essentially what existing `
+          + `dashboards show.`);
+  }
+  return `<p>${bits.join(" ")}</p>`;
+}
+
+function geyserBlock(g, noise){
+  const s = g.served;
+  const modeChip = g.mode === "context"
+      ? `<span class="chip mode">context only</span>`
+    : g.mode === "phase-limited"
+      ? `<span class="chip mode">phase-limited</span>` : "";
+  const head = `<summary>`
+    + `<span class="g-name">${esc(g.geyser)}</span>`
+    + (s ? `<span class="g-serves">${esc(s.label)}</span>` : `<span class="g-serves">no prediction</span>`)
+    + (s && s.pinned ? `<span class="chip pin">pinned</span>` : "")
+    + modeChip
+    + (s ? `<span class="g-crps">CRPS ${mins(s.metrics.crps)} min</span>` : "")
+    + `</summary>`;
+
+  let b = `<div class="g-body">`;
+  if (g.summary) b += `<p class="g-sum">${rich(g.summary)}</p>`;
+  if (g.why){
+    b += `<h5>${s ? "Why this model" : "Why there is no prediction"}</h5>`
+       + `<p>${rich(g.why)}</p>`;
+  }
+  if (s){
+    b += choiceLine(g, noise) + servedStats(g);
+    b += `<h5>Every model, same eruptions</h5>` + leaderboard(g);
+  }
+  if (g.nowcast){
+    b += `<h5>What a live neighbour signal is worth here</h5>`
+       + nowcastRows(g.nowcast, g.geyser);
+  }
+  if (g.honest){
+    b += `<h5>What a gazer actually experiences</h5><p>`
+      + `${g.honest.pct_rejected.toFixed(1)}% of this geyser's raw gaps are rejected by the validity `
+      + `filter as probable missed eruptions. Scored against <b>every</b> gap including those, `
+      + `the nominal 90% band holds ${pct(g.honest.cov90)} of the time against `
+      + `${pct(g.honest.cov90_filtered)} on filtered intervals — a cost of `
+      + `${Math.round(g.honest.cost_points)} coverage points, paid by observation gaps rather `
+      + `than by the model.</p>`;
+  }
+  if (g.data) b += `<h5>Where the data comes from</h5><p>${rich(g.data)}</p>`;
+  if (g.entry_mix){
+    const m = g.entry_mix;
+    b += `<p class="note">Entry mix since 2015, as a share of valid intervals: `
+      + `${m.webcam}% webcam · ${m.electronic}% electronic logger · `
+      + `${m.approximate}% approximate time · ${m.in_eruption}% logged while in eruption.</p>`;
+  }
+  if (g.phase_window_cycles != null){
+    b += `<p class="note">Phase-limited: a live countdown appears only while the last report is `
+      + `fresher than ${g.phase_window_cycles} eruption cycles, the point at which its phase `
+      + `information is measurably gone. Otherwise the card shows planning information and `
+      + `makes no clock-time claim — and nothing is logged to the scoreboard, because scoring `
+      + `it would score a claim never made.</p>`;
+  }
+  if (g.gaps && g.gaps.length){
+    b += `<h5>Known gaps</h5><ul class="gaps">`
+      + g.gaps.map(x => `<li>${rich(x)}</li>`).join("") + `</ul>`;
+  }
+  // The gaps listed above are the ones we know about. This is for the ones we
+  // do not — reported by whoever was standing there when the card was wrong.
+  b += `<a class="more" href="#contact" data-report="${esc(g.geyser)}">`
+    + `saw this card get it wrong? tell us →</a>`;
+  b += `</div>`;
+  return `<details class="g" id="${esc(g.slug)}">${head}${b}</details>`;
+}
+
+/* ── corrections form ───────────────────────────────────────
+   Posts to /api/contact, which the Worker answers itself: the
+   container holds no mail credentials and never sees this. The
+   dwell time is sent because a real report takes longer than
+   three seconds to type, and the empty `website` field is a
+   honeypot — a person never sees it, a script fills it in.   */
+const PAGE_LOADED = Date.now();
+
+function contactSection(doc){
+  const options = ["General"].concat(doc.geysers.map(g => g.geyser))
+    .map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+  return `<section id="contact"><h2>corrections</h2>`
+    + `<h3 class="title">Tell us where this is wrong</h3>`
+    + `<div class="section-lede">The most useful message anybody can send is a card that was `
+    + `confidently wrong while you were standing in front of it — which geyser, what it said, `
+    + `and what actually happened. Every serving bug this project has found in production was `
+    + `caught that way, by a number that looked wrong to somebody watching. Disagreements with `
+    + `the method above are just as welcome.</div>`
+    + `<form class="contact" id="c-form" novalidate>`
+    + `<div class="f-row"><label for="c-geyser">What is this about?</label>`
+    + `<select id="c-geyser">${options}</select></div>`
+    + `<div class="f-row"><label for="c-message">What happened?</label>`
+    + `<textarea id="c-message" maxlength="4000" required placeholder="Castle said 3h 12m at `
+    + `09:40 and it went at 08:05 — second time this week."></textarea>`
+    + `<div class="f-hint">Times, dates and what you saw are all useful. No account needed.</div>`
+    + `</div>`
+    + `<div class="f-row"><label for="c-email">Your email — optional</label>`
+    + `<input id="c-email" type="email" autocomplete="email" placeholder="only if you would `
+    + `like a reply">`
+    + `<div class="f-hint">Used to reply to you and nothing else. Leave it blank and the `
+    + `message is anonymous.</div></div>`
+    + `<div class="f-hp" aria-hidden="true"><label for="c-website">Website</label>`
+    + `<input id="c-website" tabindex="-1" autocomplete="off"></div>`
+    + `<div class="f-foot"><button class="f-send" id="c-send" type="submit">Send</button>`
+    + `<span class="f-status" id="c-status" role="status" aria-live="polite"></span></div>`
+    + `</form>`
+    + `<p class="note">Your message is emailed to the person who maintains this project. `
+    + `Nothing you type here is stored on the site, published, or used for anything else. `
+    + `If you would rather use GitHub, the issue tracker is linked above.</p>`
+    + `</section>`;
+}
+
+async function sendContact(ev){
+  ev.preventDefault();
+  const btn = document.getElementById("c-send");
+  const status = document.getElementById("c-status");
+  const say = (cls, text) => { status.className = "f-status " + cls; status.textContent = text; };
+  const message = document.getElementById("c-message").value.trim();
+  if (message.length < 10){ say("bad", "Please say a little more than that."); return; }
+
+  btn.disabled = true;
+  say("", "Sending…");
+  try{
+    const r = await fetch("/api/contact", {
+      method: "POST",
+      headers: {"content-type": "application/json"},
+      signal: AbortSignal.timeout(20000),
+      body: JSON.stringify({
+        message,
+        email:   document.getElementById("c-email").value.trim(),
+        geyser:  document.getElementById("c-geyser").value,
+        website: document.getElementById("c-website").value,
+        page:    location.href,
+        elapsed_ms: Date.now() - PAGE_LOADED,
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.ok){
+      document.getElementById("c-message").value = "";
+      say("ok", document.getElementById("c-email").value.trim()
+        ? "Sent — thank you. We will reply to the address you gave."
+        : "Sent — thank you.");
+    } else {
+      say("bad", d.error || `That did not send (HTTP ${r.status}). Please try again shortly.`);
+    }
+  }catch(err){
+    say("bad", "Could not reach the server. Please try again shortly.");
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+/** "saw this card get it wrong?" — arrive at the form with that geyser chosen. */
+function wireContact(){
+  const form = document.getElementById("c-form");
+  if (form) form.addEventListener("submit", sendContact);
+  document.querySelectorAll("[data-report]").forEach(a => {
+    a.addEventListener("click", () => {
+      const sel = document.getElementById("c-geyser");
+      if (sel) sel.value = a.dataset.report;
+      const msg = document.getElementById("c-message");
+      if (msg) setTimeout(() => msg.focus({preventScroll: true}), 350);
+    });
+  });
+}
+
+/* ── page assembly ──────────────────────────────────────── */
+function render(doc){
+  const noise = doc.noise_margin_pct;
+  const toc = [...doc.sections.map(s => ({href: "#" + s.id, label: s.title})),
+               {href: "#geysers", label: "Every geyser"},
+               {href: "#open", label: "Where the gaps are"},
+               {href: "#contact", label: "Send a correction"}];
+
+  let h = `<div class="lede">${paras(doc.overview)}</div>`;
+  h += `<nav class="toc" aria-label="Contents"><div class="toc-lab">Contents</div><ol>`
+     + toc.map(t => `<li><a href="${t.href}">${esc(t.label)}</a></li>`).join("")
+     + `</ol></nav>`;
+
+  h += doc.sections.map(s => renderSection(s, doc)).join("");
+
+  h += `<section id="geysers"><h2>per geyser</h2>`
+     + `<h3 class="title">Every geyser's working</h3>`
+     + `<div class="section-lede">One block per card on the dashboard: the model that serves `
+     + `it and why, every model scored on the same eruptions, what the numbers look like `
+     + `against all the intervals rather than the clean ones, and the gaps in that particular `
+     + `forecast. Collapsed to stay readable — open the one you care about, or link straight `
+     + `to it.</div>`
+     + doc.geysers.map(g => geyserBlock(g, noise)).join("")
+     + `</section>`;
+
+  h += `<section id="open"><h2>where the gaps are</h2>`
+     + `<h3 class="title">Known gaps, and how to help</h3>`
+     + `<div class="section-lede">In rough order of how much they would move the predictions. `
+     + `Nothing here is rhetorical: each one is a thing this project knows it is missing, `
+     + `with the measurement that says so.</div>`
+     + doc.open_gaps.map(x => `<div class="block gap">`
+         + `<span class="who">${esc(x.who)}</span>`
+         + `<h4>${esc(x.title)}</h4><p>${rich(x.text)}</p></div>`).join("")
+     + `<div class="tw"><table><thead><tr><th>Where to look</th><th>What is there</th>`
+     + `</tr></thead><tbody>`
+     + doc.links.map(l => `<tr><td><a href="${esc(l.url)}" target="_blank" rel="noopener">`
+         + `${esc(l.label)} ↗</a></td>`
+         + `<td style="white-space:normal">${rich(l.text)}</td></tr>`).join("")
+     + `</tbody></table></div></section>`;
+
+  h += contactSection(doc);
+
+  document.getElementById("doc").innerHTML = h;
+  wireContact();
+
+  const cal = doc.calibration || {};
+  const total = cal.intervals && cal.intervals.total_gaps;
+  document.getElementById("stamp").textContent =
+    [cal.backtest_years ? `${cal.backtest_years}-year walk-forward` : null,
+     cal.generated ? `backtest ${cal.generated}` : null,
+     total ? `${int(total)} gaps examined` : null].filter(Boolean).join(" · ");
+
+  openFromHash();
+}
+
+/* A link to #castle has to open Castle, not scroll to a closed strip. */
+function openFromHash(){
+  const id = decodeURIComponent(location.hash.slice(1));
+  if (!id) return;
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (el.tagName === "DETAILS") el.setAttribute("open", "");
+  el.scrollIntoView({block: "start"});
+}
+window.addEventListener("hashchange", openFromHash);
+
+document.getElementById("theme").addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const dark = cur ? cur === "dark"
+    : window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+});
+
+fetch("/api/method", {signal: AbortSignal.timeout(30000)})
+  .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+  .then(render)
+  .catch(err => {
+    document.getElementById("doc").innerHTML =
+      `<div class="err">Could not load the method document. ${esc(String(err))}</div>
+       <p class="note">The write-up also lives in the repository, in
+       <a href="https://github.com/davidkingham/signal-basin/blob/main/docs/findings/README.md">docs/findings</a>.</p>`;
+    document.getElementById("stamp").textContent = "offline";
+  });
+</script>
+</body>
+</html>

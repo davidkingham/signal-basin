@@ -11,6 +11,7 @@ from .config import DB_PATH, TARGET_GEYSERS
 from .service import (
     get_geyser_stats,
     get_health,
+    get_method,
     get_predictions,
     get_recent_comparisons,
     get_recent_eruptions,
@@ -140,12 +141,40 @@ def comparisons_recent(
     )
 
 
+@app.get("/api/method")
+def method() -> dict:
+    """How the predictions are made, tested, and where they fall short.
+
+    Deliberately independent of the database: it describes the models as built
+    and as scored by the last walk-forward backtest, so it answers instantly and
+    keeps answering when the snapshot is still downloading.
+    """
+    return get_method()
+
+
+@app.get("/api/method/{geyser}")
+def method_one(geyser: str) -> dict:
+    """One geyser's working: served model, full leaderboard, calibration, gaps."""
+    if geyser.lower() == "steamboat":
+        return get_method("Steamboat")
+    return get_method(_resolve(geyser))
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> HTMLResponse:
     index = STATIC_DIR / "index.html"
     if not index.exists():
         raise HTTPException(500, "Dashboard asset missing.")
     return HTMLResponse(index.read_text())
+
+
+@app.get("/method", response_class=HTMLResponse)
+def method_page() -> HTMLResponse:
+    """The shareable long-form version of `/api/method`."""
+    page = STATIC_DIR / "method.html"
+    if not page.exists():
+        raise HTTPException(500, "Method asset missing.")
+    return HTMLResponse(page.read_text())
 
 
 def serve(host: str = "127.0.0.1", port: int = 8000, reload: bool = False) -> None:
