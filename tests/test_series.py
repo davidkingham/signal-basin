@@ -100,3 +100,16 @@ class TestServingPath:
         assert r is not None
         assert r["model"] == "series_conditional"
         assert "series" in r["explain"]["branch"]["condition"]
+
+    def test_lion_explains_the_other_branch(self):
+        """Lion's forecast hangs on the anchor's `ini` flag; the card must show
+        what the other reading would say (2026-09-07 visitor feedback)."""
+        from geyser_ai.predict import predict_geyser
+
+        r = predict_geyser("Lion")
+        br = r["explain"]["branch"]
+        assert br["flag"] == "initial"
+        alt = br["alternative"]
+        assert alt["condition"] != br["condition"]
+        assert alt["predicted_utc"] and alt["median_interval_min"] > 0
+        assert alt["naive_median_interval_min"] != r["naive_median_interval_min"]

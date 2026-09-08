@@ -191,6 +191,11 @@ button.theme:focus-visible,a.theme:focus-visible{
   margin-top:7px;padding:5px 8px;border-left:2px solid var(--pool-300);
   font-size:12px;color:var(--ink-2);background:var(--band-90);
 }
+.branch-note{
+  margin-top:7px;padding:5px 8px;border-left:2px solid var(--line);
+  font-size:12px;color:var(--ink-3);line-height:1.45;
+}
+.branch-note b{color:var(--ink-2);font-weight:600}
 .park-signal{
   margin:0 0 8px;padding:7px 10px;border:1px solid var(--amber);border-radius:6px;
   font-size:12.5px;color:var(--amber);font-weight:600;
@@ -708,6 +713,21 @@ function fmtDur(m){
   return m < 180 ? `${Math.round(m)} min` : `${(m/60).toFixed(1)} h`;
 }
 
+/* An edit to the anchor entry, in plain words. The observer's edit is the
+   whole reason the number moved, so name the field and the direction. */
+function revisionText(r, p){
+  const at = hhmm(r.observed_utc);
+  const when = (p.last_eruption_local||"").replace(/^\d{4}-\d{2}-\d{2} /,"");
+  if (r.field === "epoch"){
+    const d = new Date(r.new * 1000);
+    return `GT entry edited at ${at}: eruption time changed to ${hhmm(d.toISOString())}`;
+  }
+  if (r.field === "questionable") return `GT entry marked questionable at ${at}`;
+  const verb = r.new ? "added" : "removed";
+  const label = r.field === "initial" ? "series-initial" : r.field;
+  return `GT entry edited at ${at}: ${label} flag ${verb} on the ${when} eruption — the forecast switched branch`;
+}
+
 function whyPanel(p){
   const ex = p.explain || {};
   const parts = [];
@@ -721,7 +741,8 @@ function whyPanel(p){
   const idLink = a.eruption_id
     ? ` · <a href="https://www.geysertimes.org/eruption.php?id=${a.eruption_id}" target="_blank" rel="noopener">GT entry ↗</a>` : "";
   const when = (p.last_eruption_local||"").replace(/^\d{4}-\d{2}-\d{2} /,"");
-  parts.push(`<p>Anchored on ${kind} at <b>${when}</b>${approx}, logged ${entry}${idLink}.</p>`);
+  const ini = (a.flags||[]).includes("initial") ? ", flagged as a series <b>initial</b>" : "";
+  parts.push(`<p>Anchored on ${kind} at <b>${when}</b>${approx}${ini}, logged ${entry}${idLink}.</p>`);
 
   if (p.naive_interval_50_min){
     const [lo,hi] = p.naive_interval_50_min;
@@ -733,6 +754,20 @@ function whyPanel(p){
       : `${(p.n_training_intervals||0).toLocaleString()} intervals of history`;
     parts.push(`<p>${basis} <b>${fmtDur(p.naive_median_interval_min)}</b> — half of intervals land between ${fmtDur(lo)} and ${fmtDur(hi)} (${fit}).</p>`);
   }
+
+  // The branch hangs on one observer-entered flag. Say what the other branch
+  // would give, so a gazer who disagrees with the entry can read their own
+  // answer off the card instead of wondering why it says what it says.
+  const alt = ex.branch && ex.branch.alternative;
+  if (alt){
+    parts.push(`<p>That rests on the entry's <b>${ex.branch.flag}</b> flag. ${
+      alt.condition.charAt(0).toUpperCase() + alt.condition.slice(1)
+    } instead, the forecast would be <b>${hhmm(alt.predicted_utc)}</b> most likely (typically ${fmtDur(alt.naive_median_interval_min)}${
+      (p.data_age_hours||0)*60 > alt.naive_median_interval_min * 1.5
+        ? " — already passed, which is why both readings now point the same way" : ""
+    }).</p>`);
+  }
+  (a.revisions || []).forEach(r => parts.push(`<p class="aside">${revisionText(r, p)}</p>`));
 
   const pc = p.current_cycle_prob;
   if (pc != null && pc < 0.985 && (p.expected_missed_eruptions||0) >= 0.05){
@@ -988,6 +1023,22 @@ function card(p){
   }
   add(p.model.replace(/_/g," "));
   el.appendChild(chips);
+  // Branch geysers up front: which reading of the anchor the forecast rests
+  // on, what the other reading would say, and whether the entry was edited
+  // under us. Lion's two branches are ~80 min apart vs ~10 h -- a visitor
+  // who saw the card jump deserves the reason on the card, not in a panel.
+  const br = (p.explain||{}).branch;
+  if (br && br.alternative && !live){
+    const d = document.createElement("div");
+    d.className = "branch-note";
+    const revs = ((p.explain.anchor||{}).revisions || []).filter(r => r.field === br.flag);
+    const edited = revs.length ? revs[revs.length-1] : null;
+    d.innerHTML = (edited
+        ? `<b>Entry edited ${hhmm(edited.observed_utc)}</b> — ${edited.new ? "now" : "no longer"} flagged ${br.flag === "initial" ? "a series initial" : "a " + br.flag}. `
+        : `<b>${br.condition.charAt(0).toUpperCase() + br.condition.slice(1)}</b> per the GT entry. `)
+      + `${br.alternative.condition.charAt(0).toUpperCase() + br.alternative.condition.slice(1)} it would be <b>${hhmm(br.alternative.predicted_utc)}</b>.`;
+    el.appendChild(d);
+  }
   // Live precursor notes, each carrying its own measured hit rate -- the
   // number IS the honesty (a 7% signal must say 7%).
   (p.live_signals || []).forEach(txt => {

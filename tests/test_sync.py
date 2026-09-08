@@ -156,3 +156,51 @@ class TestSync:
         n1 = sync_mod.sync_status()["n_total"]
         sync_mod.sync_recent(force=True)
         assert sync_mod.sync_status()["n_total"] == n1, "re-syncing must not duplicate rows"
+
+
+class TestRevisions:
+    """Edits to entries we already hold are the only explanation the dashboard
+    can give for a prediction that jumps -- GeyserTimes exposes no history."""
+
+    def _sync(self, monkeypatch, entries):
+        monkeypatch.setattr(
+            sync_mod.httpx,
+            "get",
+            lambda url, **kw: FakeResponse({"status": "success", "entries": entries}),
+        )
+        sync_mod._state.update(last_attempt=0.0, error=None)
+        return sync_mod.sync_recent(force=True)
+
+    def test_removed_initial_flag_is_recorded(self, monkeypatch):
+        now = int(time.time())
+        self._sync(monkeypatch, [entry(96001, "Lion", now - 7200, ini="1")])
+        res = self._sync(monkeypatch, [entry(96001, "Lion", now - 7200, ini="0")])
+        assert res["n_revisions"] == 1
+        revs = sync_mod.entry_revisions(96001)
+        assert [(r["field"], r["old"], r["new"]) for r in revs] == [("initial", True, False)]
+
+    def test_unchanged_resync_records_nothing(self, monkeypatch):
+        now = int(time.time())
+        e = entry(96002, "Lion", now - 600, ini="1")
+        self._sync(monkeypatch, [e])
+        res = self._sync(monkeypatch, [e])
+        assert res["n_revisions"] == 0
+        assert sync_mod.entry_revisions(96002) == []
+
+    def test_withdrawn_entry_is_deleted_and_recorded(self, monkeypatch):
+        now = int(time.time())
+        self._sync(monkeypatch, [entry(96003, "Grand", now - 600)])
+        self._sync(monkeypatch, [entry(96003, "Grand", now - 600, q="1")])
+        import duckdb
+
+        from geyser_ai.config import DB_PATH
+
+        con = duckdb.connect(str(DB_PATH), read_only=True)
+        try:
+            n = con.execute(
+                "SELECT count(*) FROM recent_eruptions WHERE eruption_id = 96003"
+            ).fetchone()[0]
+        finally:
+            con.close()
+        assert n == 0, "a retracted entry must stop anchoring predictions"
+        assert sync_mod.entry_revisions(96003)[0]["field"] == "questionable"

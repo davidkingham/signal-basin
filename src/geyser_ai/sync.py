@@ -33,6 +33,7 @@ _state: dict[str, Any] = {
     "last_success": None,
     "n_last": 0,
     "n_total": 0,
+    "n_revisions": 0,
     "error": None,
     "lookback_min": 0,
 }
@@ -73,6 +74,82 @@ def _ensure_table(con: duckdb.DuckDBPyConnection) -> None:
         )
         """
     )
+    # Edits to entries we have already served. GeyserTimes exposes no edit
+    # history, only the current row, so the only way to know that an anchor's
+    # `ini` flag was removed two hours after entry is to have seen both states.
+    # The dashboard reads this to say WHY a prediction jumped: on 2026-09-07 a
+    # Lion visitor watched the card flip from ~19:00 to a 22:00-07:00 window
+    # with no explanation, because the entrant un-flagged the initial.
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS entry_revisions (
+            eruption_id BIGINT,
+            geyser      VARCHAR,
+            field       VARCHAR,
+            old_value   VARCHAR,
+            new_value   VARCHAR,
+            observed_at TIMESTAMP WITH TIME ZONE
+        )
+        """
+    )
+
+
+# The fields whose edit changes a prediction: the anchor's time, and the flags
+# the conditional models branch on. Everything else (comments, observer) is
+# noise for this purpose.
+_REVISION_FIELDS = ("epoch", "initial", "major", "minor")
+REVISION_RETENTION_DAYS = 7
+
+
+def _record_revisions(
+    con: duckdb.DuckDBPyConnection,
+    rows: list[tuple],
+    withdrawn: list[tuple[int, str]],
+    observed_at: dt.datetime,
+) -> int:
+    """Diff incoming entries against what we already hold and log every change.
+
+    `rows` are the tuples about to be upserted; `withdrawn` are (id, geyser)
+    pairs now flagged questionable, which are deleted so a retracted anchor
+    stops anchoring anything.
+    """
+    ids = [r[0] for r in rows] + [w[0] for w in withdrawn]
+    if not ids:
+        return 0
+    existing = {
+        int(eid): (int(epoch), bool(ini), bool(maj), bool(mnr))
+        for eid, epoch, ini, maj, mnr in con.execute(
+            "SELECT eruption_id, epoch, initial, major, minor FROM recent_eruptions "
+            "WHERE eruption_id IN (SELECT unnest(?::BIGINT[]))",
+            [ids],
+        ).fetchall()
+    }
+    flag_idx = {name: 4 + i for i, name in enumerate(_FLAGS.values())}
+    revs: list[tuple] = []
+    for r in rows:
+        prev = existing.get(r[0])
+        if prev is None:
+            continue
+        incoming = (
+            int(r[2]),
+            bool(r[flag_idx["initial"]]),
+            bool(r[flag_idx["major"]]),
+            bool(r[flag_idx["minor"]]),
+        )
+        for field, old, new in zip(_REVISION_FIELDS, prev, incoming, strict=True):
+            if old != new:
+                revs.append((r[0], r[1], field, str(old), str(new), observed_at))
+    for eid, geyser in withdrawn:
+        if eid in existing:
+            revs.append((eid, geyser, "questionable", "False", "True", observed_at))
+            con.execute("DELETE FROM recent_eruptions WHERE eruption_id = ?", [eid])
+    if revs:
+        con.executemany("INSERT INTO entry_revisions VALUES (?,?,?,?,?,?)", revs)
+    con.execute(
+        "DELETE FROM entry_revisions WHERE observed_at < ?",
+        [observed_at - dt.timedelta(days=REVISION_RETENTION_DAYS)],
+    )
+    return len(revs)
 
 
 def _archive_max_epoch(con: duckdb.DuckDBPyConnection) -> int | None:
@@ -156,6 +233,7 @@ def sync_recent(
 
             entries = payload.get("entries") or []
             rows = []
+            withdrawn: list[tuple[int, str]] = []
             for e in entries:
                 eid = _as_int(e.get("eruptionID"))
                 epoch = _as_int(e.get("time"))
@@ -167,6 +245,7 @@ def sync_recent(
                 if pid is not None and pid != eid:
                     continue
                 if _as_bool(e.get("q")):
+                    withdrawn.append((eid, geyser))
                     continue
                 rows.append(
                     (
@@ -185,6 +264,11 @@ def sync_recent(
                 )
 
             inserted = 0
+            try:
+                n_rev = _record_revisions(con, rows, withdrawn, dt.datetime.now(tz=dt.UTC))
+            except duckdb.Error as exc:  # bookkeeping must never block the sync
+                n_rev = 0
+                _state["revision_error"] = f"{type(exc).__name__}: {exc}"
             if rows:
                 con.executemany(
                     """
@@ -200,6 +284,7 @@ def sync_recent(
                 last_success=now,
                 n_last=inserted,
                 n_total=int(total),
+                n_revisions=n_rev,
                 error=None,
                 lookback_min=lookback,
             )
@@ -210,3 +295,45 @@ def sync_recent(
 
 def sync_status() -> dict[str, Any]:
     return dict(_state)
+
+
+def entry_revisions(eruption_id: int, hours: float = 24.0, db_path=DB_PATH) -> list[dict[str, Any]]:
+    """Edits we have witnessed to one entry, oldest first. Empty when none."""
+    con = duckdb.connect(str(db_path), read_only=True)
+    try:
+        has = con.execute(
+            "SELECT count(*) FROM duckdb_tables() WHERE table_name = 'entry_revisions'"
+        ).fetchone()[0]
+        if not has:
+            return []
+        rows = con.execute(
+            """
+            SELECT field, old_value, new_value, observed_at FROM entry_revisions
+            WHERE eruption_id = ? AND observed_at >= now() - to_seconds(?)
+            ORDER BY observed_at
+            """,
+            [int(eruption_id), int(hours * 3600)],
+        ).fetchall()
+    finally:
+        con.close()
+    out = []
+    for field, old, new, at in rows:
+        at = at if at.tzinfo else at.replace(tzinfo=dt.UTC)
+        out.append(
+            {
+                "field": field,
+                "old": _from_str(old),
+                "new": _from_str(new),
+                "observed_utc": at.astimezone(dt.UTC).isoformat(),
+            }
+        )
+    return out
+
+
+def _from_str(v: str) -> Any:
+    if v in ("True", "False"):
+        return v == "True"
+    try:
+        return int(v)
+    except ValueError:
+        return v

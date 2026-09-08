@@ -18,6 +18,7 @@ from .models import (
     renewal_forecast,
 )
 from .observation import hourly_logging_profile, observation_completeness_at
+from .sync import entry_revisions
 
 
 def _anchor(geyser: str, db_path=DB_PATH) -> pd.Series | None:
@@ -178,16 +179,20 @@ def predict_geyser(
     marginal = (
         SeriesConditionalModel().fit_marginal(hist) if geyser in SERIES_GEYSERS else None
     ) or fit_tail_mixture(intervals)
-    base_dist = fit_tail_mixture(intervals, narrow=pred.dist) or pred.dist
-    # Past the first simulated eruption the branch is unknown again, so chained
-    # missed-eruption draws revert to the marginal.
-    rpred, exp_missed, p_current = renewal_forecast(
-        base_dist,
-        max(age_min, 0.0),
-        p_profile,
-        rest_dist=marginal or base_dist,
-        anchor_hour=anchor_hour,
-    )
+
+    def renewal(fit):
+        base = fit_tail_mixture(intervals, narrow=fit) or fit
+        # Past the first simulated eruption the branch is unknown again, so
+        # chained missed-eruption draws revert to the marginal.
+        return base, *renewal_forecast(
+            base,
+            max(age_min, 0.0),
+            p_profile,
+            rest_dist=marginal or base,
+            anchor_hour=anchor_hour,
+        )
+
+    base_dist, rpred, exp_missed, p_current = renewal(pred.dist)
     med = rpred.median()
     lo50, hi50 = rpred.interval(0.50)
     lo90, hi90 = rpred.interval(0.90)
@@ -205,37 +210,76 @@ def predict_geyser(
         if bool(last.get("webcam", False))
         else "in-person"
     )
+    anchor_id = int(last["eruption_id"]) if pd.notna(last.get("eruption_id")) else None
     explain: dict = {
         "anchor": {
-            "eruption_id": int(last["eruption_id"]) if pd.notna(last.get("eruption_id")) else None,
+            "eruption_id": anchor_id,
             "entry_type": entry_type,
             "flags": [
                 f
-                for f in ("major", "minor", "approximate", "in_eruption")
+                for f in ("initial", "major", "minor", "approximate", "in_eruption")
                 if bool(last.get(f, False))
             ],
         },
     }
-    if geyser in MINOR_MODE_GEYSERS and "prev_minor" in hist.columns:
+    # Edits to the anchor entry since we first served it. A prediction that
+    # jumps because an observer removed the `ini` flag two hours later must say
+    # so -- the visitor watching the card has no other way to know.
+    if anchor_id is not None:
+        try:
+            revs = entry_revisions(anchor_id, db_path=db_path)
+        except Exception:  # bookkeeping; never worth failing a prediction over
+            revs = []
+        if revs:
+            explain["anchor"]["revisions"] = revs
+
+    branch_flag = (
+        "minor"
+        if geyser in MINOR_MODE_GEYSERS and "prev_minor" in hist.columns
+        else "initial"
+        if geyser in SERIES_GEYSERS and "prev_initial" in hist.columns
+        else None
+    )
+    if branch_flag:
         # The branch the conditional model selected, with the evidence behind
-        # it: how many recent post-minor / post-major intervals it was fit on.
-        recent_flags = hist.tail(400)["prev_minor"].astype(bool)
-        was_minor = bool(row["prev_minor"])
+        # it: how many recent intervals on that branch it was fit on.
+        col = f"prev_{branch_flag}"
+        window = 400 if branch_flag == "minor" else 600
+        recent_flags = hist.tail(window)[col].astype(bool)
+        flagged = bool(row[col])
+        names = (
+            {True: "after a minor", False: "after a full eruption"}
+            if branch_flag == "minor"
+            else {True: "after a series initial", False: "after a mid-series eruption"}
+        )
         explain["branch"] = {
-            "condition": "after a minor" if was_minor else "after a full eruption",
-            "n_branch": int((recent_flags == was_minor).sum()),
+            "flag": branch_flag,
+            "condition": names[flagged],
+            "n_branch": int((recent_flags == flagged).sum()),
             "n_window": int(len(recent_flags)),
         }
-    elif geyser in SERIES_GEYSERS and "prev_initial" in hist.columns:
-        recent_flags = hist.tail(600)["prev_initial"].astype(bool)
-        was_initial = bool(row["prev_initial"])
-        explain["branch"] = {
-            "condition": (
-                "after a series initial" if was_initial else "after a mid-series eruption"
-            ),
-            "n_branch": int((recent_flags == was_initial).sum()),
-            "n_window": int(len(recent_flags)),
-        }
+        # The other branch, forecast the same way: the whole prediction hangs
+        # on one observer-entered flag, so show what the card would say if it
+        # were the other way. When the anchor is fresh the two answers can
+        # differ by ten hours (Lion: ~80 min in-series vs ~10 h between).
+        alt_row = row.copy()
+        alt_row[col] = not flagged
+        try:
+            alt = model.fit_predict(hist, alt_row)
+        except Exception:
+            alt = None
+        if alt is not None:
+            _, alt_r, _, _ = renewal(alt.dist)
+            a_med = alt_r.median()
+            a_lo, a_hi = alt_r.interval(0.50)
+            explain["branch"]["alternative"] = {
+                "condition": names[not flagged],
+                "median_interval_min": round(a_med, 1),
+                "predicted_utc": (last_ts + pd.Timedelta(minutes=float(a_med))).isoformat(),
+                "predicted_time_local": at(a_med),
+                "window_50_local": [at(a_lo), at(a_hi)],
+                "naive_median_interval_min": round(alt.median(), 1),
+            }
 
     # Flag the regime so the caller knows which answer they are looking at.
     stale = exp_missed >= 0.5
