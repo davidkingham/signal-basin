@@ -654,8 +654,11 @@ response in the container's Durable Object storage and recomputes it off the
 request path:
 
 - a reader is served the cached answer in **under 200 ms**;
-- past ten minutes of staleness the Worker stops trusting the cron and
-  recomputes on the request, so nobody is ever handed a stale prediction;
+- past ten minutes of staleness the cron has evidently stopped warming that
+  shape; the read renews its interest so the next tick recomputes it, and the
+  reader still gets the cached answer — a forecast is a set of absolute times,
+  and a stale one beats a 20–40 s wait that runs past the page's timeout;
+- past an hour even that is withheld and the request recomputes in-line;
 - `/api/health` is never cached — it is the honest freshness probe.
 
 The five-minute cron does two different jobs. The **ledger tick is
@@ -665,8 +668,11 @@ would have permanent holes exactly where the park is quietest, and the
 comparison against the NPS and Geysers.net would be drawn from a biased sample of
 the day. One `/api/predictions` run generates the forecast, logs it, pulls every
 open third-party prediction and scores whatever has erupted, so a single call
-covers all of it. **Response-cache warming stays visitor-gated** — there is no
-point recomputing a dashboard shape nobody has asked for.
+covers all of it. That call is **the dashboard's own request, under the
+dashboard's own cache key**, so the page's first fetch is a hit around the clock
+whether or not anyone has visited lately. **Warming every other shape stays
+visitor-gated** — there is no point recomputing a detail view nobody has asked
+for.
 
 That keeps the container awake permanently, which is a deliberate trade. At
 `basic` the standing cost is memory and disk rather than CPU: roughly

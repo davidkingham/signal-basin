@@ -52,6 +52,33 @@ past the freshness window forever.
 **Fix:** a **cron trigger** does the recompute. Cron handlers get a far more
 generous wall-clock budget.
 
+## The cron must warm the key the page actually reads
+
+Observed 2026-09-03: the dashboard showing *"Could not reach the prediction
+service. TimeoutError: signal timed out"* — its 45 s fetch abort — while
+`/api/health` and a fresh `curl` answered in 200 ms. Nothing was down.
+
+The cron's ledger tick fetched `/api/predictions` with no query string and
+cached it under a private key. The dashboard reads
+`/api/predictions?hours=12&points=140`, a different key, which was warmed
+only while a visitor had been seen in the last ten minutes. So the container
+computed the same forecast every five minutes under a name nobody read, and
+after a quiet stretch the first visitor's request fell past `MAX_STALE_MS`
+into an in-line recompute — 20–40 s alone, and when it landed on top of the
+cron's own tick the two shared a quarter of a vCPU and ran past the timeout.
+`eruptions/recent` recomputing alongside made it worse.
+
+**Fix, two parts.** The tick now fetches the dashboard's exact URL and stores
+under the dashboard's exact key, so the page's first call is a hit around the
+clock. And past `MAX_STALE_MS` a read serves the stale entry instead of
+recomputing — the read has just re-recorded interest in the key, so the next
+tick refreshes it (`waitUntil` cannot, see above). Only past an hour, or with
+nothing cached, does a reader wait.
+
+Diagnostic tell: `x-geyser-cache: miss` on the dashboard's prediction URL,
+or an `x-geyser-cache-age` over 300 on it. The tick runs every five minutes;
+if that key is ever older, the cron is failing, not idle.
+
 ## Durable Object writes are not free on a hot read path
 
 Recording "somebody asked for this endpoint" with a `storage.put()` on **every**

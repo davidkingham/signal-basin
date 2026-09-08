@@ -92,8 +92,18 @@ const ACTIVITY_WRITE_INTERVAL_MS = 60_000;
  */
 const MAX_REFRESH_TARGETS = 6;
 
-/** Beyond this the cached answer is too old to serve; recompute and make them wait. */
+/**
+ * Beyond this the cron has evidently lost interest in the entry. The read
+ * itself re-records that interest, so the next tick recomputes it; until then
+ * the reader still gets the cached answer. A forecast is a set of absolute
+ * times and a ten-minute-old one is far more useful than a twenty-second wait
+ * that, landing on top of the cron's own recompute on a quarter of a vCPU, runs
+ * past the page's 45 s timeout and shows an error instead. (Not a background
+ * refresh: `waitUntil` is cancelled long before a container fetch returns.)
+ */
 const MAX_STALE_MS = 10 * 60_000;
+/** Past this even a stale answer is withheld; the reader waits on a fresh one. */
+const MAX_SERVABLE_MS = 60 * 60_000;
 
 /**
  * Contact form.
@@ -167,9 +177,18 @@ const looksLikeEmail = (s: string): boolean => /^[^@\s]+@[^@\s.]+\.[^@\s]+$/.tes
  * reached through the Durable Object, not DNS -- but the path is not: this
  * endpoint is what generates a forecast, logs it, pulls the third-party
  * predictions and scores whatever has erupted.
+ *
+ * The query string is the dashboard's, exactly, and the cache key is the one
+ * the dashboard reads. The tick used to hit the bare path and cache under a
+ * private key, which meant the container computed the same forecast every
+ * five minutes under a name nobody read while the dashboard's own entry went
+ * cold after ten quiet minutes -- and the next visitor then waited on a full
+ * recompute, racing the cron for a quarter of a vCPU, past the page's 45 s
+ * timeout. Warming the real key makes the first call of a cold visit a hit.
  */
-const LEDGER_TICK_URL = "http://geyser-ai.internal/api/predictions";
-const LEDGER_TICK_KEY = `${CACHE_VERSION}:ledger-tick`;
+const DASHBOARD_PATH = "/api/predictions?hours=12&points=140";
+const LEDGER_TICK_URL = `http://geyser-ai.internal${DASHBOARD_PATH}`;
+const LEDGER_TICK_KEY = `${CACHE_VERSION}:${DASHBOARD_PATH}`;
 
 function freshnessFor(pathname: string): number | null {
   if (pathname === "/api/predictions" || pathname.startsWith("/api/predictions/")) {
@@ -637,10 +656,12 @@ export default {
       const age = entry ? Date.now() - entry.storedAt : Infinity;
 
       if (age < freshMs) return fromCache(entry!, "hit");
-      // Recent enough to serve while the cron recomputes it. Past MAX_STALE_MS
-      // the cron is evidently not keeping up, so fall through and recompute
-      // here rather than hand out an answer nobody should act on.
+      // Recent enough that the cron is about to recompute it anyway.
       if (age < MAX_STALE_MS) return fromCache(entry!, "stale");
+      // The cron had lost interest in this shape; readCache just renewed it,
+      // so the next tick recomputes. Only a genuinely old entry, or none,
+      // makes the reader wait.
+      if (age < MAX_SERVABLE_MS) return fromCache(entry!, "stale");
       return await refresh(stub, request, key);
     } catch (err) {
       console.error(JSON.stringify({ event: "proxy_failed", error: String(err) }));
@@ -676,18 +697,12 @@ export default {
     const stub = getContainer(env.GEYSER_CONTAINER, SINGLETON);
     const warm = await stub.refreshTargets();
 
-    // A visitor-driven refresh of the prediction endpoint already does the
-    // ledger's work, so don't pay for it twice.
-    const alreadyPredicts = warm.some((t) => {
-      try {
-        return new URL(t.url).pathname === "/api/predictions";
-      } catch {
-        return false;
-      }
-    });
-    const targets = alreadyPredicts
-      ? warm
-      : [{ key: LEDGER_TICK_KEY, url: LEDGER_TICK_URL }, ...warm];
+    // The tick is the dashboard's own request, so when a visitor has been
+    // reading it the two are one refresh, not two.
+    const targets = [
+      { key: LEDGER_TICK_KEY, url: LEDGER_TICK_URL },
+      ...warm.filter((t) => t.key !== LEDGER_TICK_KEY),
+    ];
 
     for (const target of targets) {
       try {
