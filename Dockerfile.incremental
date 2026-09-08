@@ -27,7 +27,7 @@
 #
 # The clean `Dockerfile` remains the normal path. Use this when the network will
 # not carry a full push, and rebuild properly from a better connection.
-ARG BASE=registry.cloudflare.com/0164f94eae0d65c54aab03c444d3aba1/signal-basin-geysercontainer:0e4278d7
+ARG BASE=registry.cloudflare.com/0164f94eae0d65c54aab03c444d3aba1/signal-basin-geysercontainer@sha256:ce363c6bbbbd857e1b97bf7334b11320bb372b6485113b8b6b733e31a3ec9914
 FROM ${BASE}
 
 COPY --chown=geyser:geyser src /app/src
