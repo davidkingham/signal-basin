@@ -421,6 +421,13 @@ The design is deliberate rather than templated:
   intervals are counted, and what this forecast is known to get wrong. Both are
   shut by default: the page is for reading a countdown, and the working is for
   arguing with it.
+- **A forecast that hangs on one flag says so on the card face.** Lion, Castle
+  and Old Faithful branch on an observer-entered flag (`ini`, `min`), and the
+  two branches can sit ten hours apart. The card names the branch it took, what
+  the other reading would give, and — because GeyserTimes entries get edited
+  after the fact — when the anchor entry was last changed and how. This came
+  from a visitor who watched Lion's card jump while standing at the geyser; see
+  [live-scoreboard.md](docs/findings/live-scoreboard.md).
 
 ### Show your work: `/method`
 

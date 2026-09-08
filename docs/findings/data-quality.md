@@ -261,6 +261,19 @@ Publish both columns, always.
   not `eruptionForecastNumber` as documented.
 - **Datetimes** are Unix epoch by default; add `?iso=1` for ISO 8601. Fields that
   are genuinely absent come back as empty strings, not null.
+- **Entries are edited after the fact, and the API has no history — only the
+  current row plus `timeUpdated`.** Flags are the usual casualty: a Lion entry
+  logged at 17:39 as a series initial (`ini=1`) was un-flagged at 19:39 when no
+  second eruption followed (2026-09-07, id 1561889: `timeEntered` 17:40,
+  `timeUpdated` 19:39). For a model that branches on that flag the edit is a
+  ten-hour swing in the forecast. `entries_recent` re-serves edited rows inside
+  the lookback, so a sync that diffs against what it already holds can see the
+  change; that is what `entry_revisions` does, stamped with `timeUpdated`. The
+  same mechanism catches entries later marked `q` (questionable), which must be
+  *deleted* locally — `INSERT OR REPLACE` never removes a row on its own, so a
+  retracted entry would otherwise keep anchoring predictions. Entries can also be
+  deleted outright, which the API does not report at all (see the scored Old
+  Faithful eruption that no longer exists, in live-scoreboard.md).
 
 ## Politeness, which is a contract not a courtesy
 

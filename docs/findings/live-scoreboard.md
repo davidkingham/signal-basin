@@ -170,6 +170,54 @@ Pattern to remember: any reader that consumes eruption times must union
 both tables, and a test proving a live-only entry is visible belongs next
 to every one of them.
 
+## The fourth catch: the anchor was edited under a visitor (2026-09-07)
+
+First piece of in-the-field feedback, relayed from a visitor at Lion: the
+site had said "around 7:00 or a little after", they waited, nothing came,
+and while they stood there the card flipped to "90% 22:26–06:59" with no
+explanation. Nothing in our code changed. The GeyserTimes entry did: the
+17:39 eruption (id 1561889) was logged at 17:40 — 7.5 h after the previous
+Lion, so almost certainly flagged `ini` — and edited at 19:39, after which
+`ini=0`. The series model branches on exactly that flag. Both branches,
+run against the local DB from the 17:39 anchor:
+
+| anchor read as | median | 50% window | card would say |
+|---|---|---|---|
+| series initial | 81 min | 64–112 min | **19:00**, 18:43–19:31 |
+| mid-series eruption | 351 min | 77–544 min | ~03:30 next morning |
+
+19:00 is "7:00 or a little after"; the edit at 19:39 is the moment the
+visitor saw the card move. The forecast was doing what it should — an
+observer decided the eruption was a solo, and the model followed — but the
+card gave the visitor nothing to check that against. (Even without the
+edit the density would have drifted the same way: two hours with no
+follow-up exhausts the short mode and the elapsed-time conditioning shifts
+the mass to the long mode. The edit turned a slope into a cliff.)
+
+Two changes shipped, both "show the working" rather than "change the
+model":
+
+1. **Anchor edits are witnessed and shown.** GeyserTimes exposes no edit
+   history, so `sync_recent` now diffs each incoming entry against the row it
+   already holds and records changes to the eruption time and the branch
+   flags (`ini`/`maj`/`min`) in `entry_revisions`, stamped with the API's
+   `timeUpdated`. The anchor's revisions ride along in `explain.anchor`, and
+   the card says "Entry edited 19:39 — no longer flagged a series initial."
+   Same pass fixed a latent bug: entries later flagged questionable are now
+   deleted from `recent_eruptions` instead of silently continuing to anchor.
+2. **The other branch is forecast too.** For Lion, Castle and Old Faithful
+   the model is also run with the anchor flag flipped, through the same
+   renewal forecast, and served as `explain.branch.alternative`. The card
+   face reads "After a mid-series eruption per the GT entry. After a series
+   initial it would be 19:00." A gazer who disagrees with the entry reads
+   their own answer off the card. Cost ~0.1 s per branch geyser.
+
+What the visitor asked for, beyond the fix: predictions for **Fountain,
+Lion and Artemisia** — the geysers neither the NPS nor GeyserTimes attempt —
+and explanations like Great Fountain's "the last eruption was probably not
+seen". Lion is served; Fountain (a series geyser with a Morning interaction)
+and Artemisia (a plain ~2–3 day interval geyser) are not on the roster yet.
+
 ## Footnotes for data-quality.md
 
 - The ledger scored an Old Faithful eruption at 08-06 15:32 UTC that no longer
