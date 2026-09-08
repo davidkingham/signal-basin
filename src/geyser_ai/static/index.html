@@ -716,7 +716,7 @@ function fmtDur(m){
 /* An edit to the anchor entry, in plain words. The observer's edit is the
    whole reason the number moved, so name the field and the direction. */
 function revisionText(r, p){
-  const at = hhmm(r.observed_utc);
+  const at = hhmm(r.edited_utc);
   const when = (p.last_eruption_local||"").replace(/^\d{4}-\d{2}-\d{2} /,"");
   if (r.field === "epoch"){
     const d = new Date(r.new * 1000);
@@ -1034,7 +1034,7 @@ function card(p){
     const revs = ((p.explain.anchor||{}).revisions || []).filter(r => r.field === br.flag);
     const edited = revs.length ? revs[revs.length-1] : null;
     d.innerHTML = (edited
-        ? `<b>Entry edited ${hhmm(edited.observed_utc)}</b> — ${edited.new ? "now" : "no longer"} flagged ${br.flag === "initial" ? "a series initial" : "a " + br.flag}. `
+        ? `<b>Entry edited ${hhmm(edited.edited_utc)}</b> — ${edited.new ? "now" : "no longer"} flagged ${br.flag === "initial" ? "a series initial" : "a " + br.flag}. `
         : `<b>${br.condition.charAt(0).toUpperCase() + br.condition.slice(1)}</b> per the GT entry. `)
       + `${br.alternative.condition.charAt(0).toUpperCase() + br.alternative.condition.slice(1)} it would be <b>${hhmm(br.alternative.predicted_utc)}</b>.`;
     el.appendChild(d);

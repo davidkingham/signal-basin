@@ -179,6 +179,17 @@ class TestRevisions:
         revs = sync_mod.entry_revisions(96001)
         assert [(r["field"], r["old"], r["new"]) for r in revs] == [("initial", True, False)]
 
+    def test_revision_carries_the_gazers_edit_time(self, monkeypatch):
+        """The card must say when the entrant edited, not when we noticed."""
+        now = int(time.time())
+        self._sync(monkeypatch, [entry(96004, "Lion", now - 7200, ini="1")])
+        edited = now - 1800
+        self._sync(
+            monkeypatch, [entry(96004, "Lion", now - 7200, ini="0", timeUpdated=str(edited))]
+        )
+        rev = sync_mod.entry_revisions(96004)[0]
+        assert rev["edited_utc"].startswith(time.strftime("%Y-%m-%dT%H:%M", time.gmtime(edited)))
+
     def test_unchanged_resync_records_nothing(self, monkeypatch):
         now = int(time.time())
         e = entry(96002, "Lion", now - 600, ini="1")

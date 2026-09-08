@@ -88,6 +88,9 @@ def _ensure_table(con: duckdb.DuckDBPyConnection) -> None:
             field       VARCHAR,
             old_value   VARCHAR,
             new_value   VARCHAR,
+            -- GeyserTimes' own `timeUpdated` for the entry: when the gazer made
+            -- the edit, not when our next sync happened to notice it.
+            edited_at   TIMESTAMP WITH TIME ZONE,
             observed_at TIMESTAMP WITH TIME ZONE
         )
         """
@@ -106,13 +109,28 @@ def _record_revisions(
     rows: list[tuple],
     withdrawn: list[tuple[int, str]],
     observed_at: dt.datetime,
+    edited_at: dict[int, dt.datetime] | None = None,
 ) -> int:
     """Diff incoming entries against what we already hold and log every change.
 
     `rows` are the tuples about to be upserted; `withdrawn` are (id, geyser)
     pairs now flagged questionable, which are deleted so a retracted anchor
-    stops anchoring anything.
+    stops anchoring anything. `edited_at` carries the API's `timeUpdated` per
+    entry; an entry without one is stamped with the sync time.
     """
+    edited_at = edited_at or {}
+
+    def rev(eid: int, geyser: str, field: str, old: Any, new: Any) -> tuple:
+        return (
+            eid,
+            geyser,
+            field,
+            str(old),
+            str(new),
+            edited_at.get(eid, observed_at),
+            observed_at,
+        )
+
     ids = [r[0] for r in rows] + [w[0] for w in withdrawn]
     if not ids:
         return 0
@@ -138,13 +156,13 @@ def _record_revisions(
         )
         for field, old, new in zip(_REVISION_FIELDS, prev, incoming, strict=True):
             if old != new:
-                revs.append((r[0], r[1], field, str(old), str(new), observed_at))
+                revs.append(rev(r[0], r[1], field, old, new))
     for eid, geyser in withdrawn:
         if eid in existing:
-            revs.append((eid, geyser, "questionable", "False", "True", observed_at))
+            revs.append(rev(eid, geyser, "questionable", False, True))
             con.execute("DELETE FROM recent_eruptions WHERE eruption_id = ?", [eid])
     if revs:
-        con.executemany("INSERT INTO entry_revisions VALUES (?,?,?,?,?,?)", revs)
+        con.executemany("INSERT INTO entry_revisions VALUES (?,?,?,?,?,?,?)", revs)
     con.execute(
         "DELETE FROM entry_revisions WHERE observed_at < ?",
         [observed_at - dt.timedelta(days=REVISION_RETENTION_DAYS)],
@@ -234,6 +252,7 @@ def sync_recent(
             entries = payload.get("entries") or []
             rows = []
             withdrawn: list[tuple[int, str]] = []
+            edited_at: dict[int, dt.datetime] = {}
             for e in entries:
                 eid = _as_int(e.get("eruptionID"))
                 epoch = _as_int(e.get("time"))
@@ -244,6 +263,9 @@ def sync_recent(
                 # Same rule as the archive: keep primaries, drop questionable.
                 if pid is not None and pid != eid:
                     continue
+                upd = _as_int(e.get("timeUpdated"))
+                if upd:
+                    edited_at[eid] = dt.datetime.fromtimestamp(upd, tz=dt.UTC)
                 if _as_bool(e.get("q")):
                     withdrawn.append((eid, geyser))
                     continue
@@ -265,7 +287,9 @@ def sync_recent(
 
             inserted = 0
             try:
-                n_rev = _record_revisions(con, rows, withdrawn, dt.datetime.now(tz=dt.UTC))
+                n_rev = _record_revisions(
+                    con, rows, withdrawn, dt.datetime.now(tz=dt.UTC), edited_at
+                )
             except duckdb.Error as exc:  # bookkeeping must never block the sync
                 n_rev = 0
                 _state["revision_error"] = f"{type(exc).__name__}: {exc}"
@@ -308,9 +332,9 @@ def entry_revisions(eruption_id: int, hours: float = 24.0, db_path=DB_PATH) -> l
             return []
         rows = con.execute(
             """
-            SELECT field, old_value, new_value, observed_at FROM entry_revisions
+            SELECT field, old_value, new_value, edited_at FROM entry_revisions
             WHERE eruption_id = ? AND observed_at >= now() - to_seconds(?)
-            ORDER BY observed_at
+            ORDER BY edited_at, observed_at
             """,
             [int(eruption_id), int(hours * 3600)],
         ).fetchall()
@@ -324,7 +348,7 @@ def entry_revisions(eruption_id: int, hours: float = 24.0, db_path=DB_PATH) -> l
                 "field": field,
                 "old": _from_str(old),
                 "new": _from_str(new),
-                "observed_utc": at.astimezone(dt.UTC).isoformat(),
+                "edited_utc": at.astimezone(dt.UTC).isoformat(),
             }
         )
     return out
