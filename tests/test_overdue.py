@@ -149,8 +149,57 @@ class TestTailMixture:
         late = med * 1.15
         bare = stats.lognorm(s=0.04, scale=med)
         assert bare.sf(late) < 1e-3, "fixture should make 'late' near-impossible bare"
-        assert mix.sf(late) > 0.02, f"a late eruption must stay plausible (got {mix.sf(late):.4f})"
-        assert mix.ppf(0.99) > med * 1.2, "far tail must reach genuinely long intervals"
+        # At the p_obs cap (0.995) a missed eruption carries weight 0.005, so
+        # "late" must outweigh it or the renewal forecast jumps a cycle. The
+        # measured tail weight (0.02-0.15, default 0.05) clears that with room;
+        # the old flat 0.15 cleared it by over-covering every tight geyser.
+        assert mix.sf(late) > 0.01, f"a late eruption must stay plausible (got {mix.sf(late):.4f})"
+        # Logger-complete records put the true p99 at 1.19-1.47x the median;
+        # the served tail must reach that far, and not much further.
+        assert mix.ppf(0.995) > med * 1.2, "far tail must reach genuinely long intervals"
+        assert mix.ppf(0.99) < med * 1.5, "but not pretend the geyser is wilder than its record"
+
+    def test_quantiles_survive_a_very_wide_component(self):
+        """Regression: a linear ppf grid spanning a log-sd-2 component was ~280
+        minutes coarse, and Lion's served median read 171 min against a true 90."""
+        from scipy import stats
+
+        from geyser_ai.models import TailMixture
+
+        narrow = stats.lognorm(s=0.1, scale=90.0)
+        mix = TailMixture(narrow, stats.lognorm(s=2.0, scale=90.0), 0.15)
+        assert mix.ppf(0.5) == pytest.approx(90.0, rel=0.01)
+        for q in (0.005, 0.05, 0.25, 0.75, 0.95, 0.995):
+            assert float(mix.cdf(mix.ppf(q))) == pytest.approx(q, abs=0.002), q
+
+    def test_a_bimodal_branch_is_widened_around_its_own_spread(self):
+        """The wide component's width comes from the narrow fit, not the pooled
+        history -- which on a two-mode geyser is the gap between the modes."""
+        from scipy import stats
+
+        from geyser_ai.models import TAIL_MAX_LOG_SD, TAIL_MIN_LOG_SD
+
+        rng = np.random.default_rng(2)
+        pooled = np.concatenate(
+            [rng.lognormal(np.log(70), 0.06, 1500), rng.lognormal(np.log(102), 0.06, 1500)]
+        )
+        branch = stats.lognorm(s=0.06, scale=70.0)
+        mix = fit_tail_mixture(pooled, narrow=branch)
+        assert mix.wide.kwds["s"] == pytest.approx(TAIL_MIN_LOG_SD)
+        assert mix.ppf(0.5) == pytest.approx(70.0, rel=0.01)
+        assert mix.ppf(0.95) < 85, "the post-minor 90% band must not reach the other mode"
+        # and a genuinely wide narrow component is capped, not amplified
+        wide_branch = stats.lognorm(s=1.5, scale=400.0)
+        assert fit_tail_mixture(pooled, narrow=wide_branch).wide.kwds["s"] == TAIL_MAX_LOG_SD
+
+    def test_tail_weight_is_measured_from_the_logger_record(self):
+        from geyser_ai.models import DEFAULT_TAIL_WEIGHT, TAIL_WEIGHT_BOUNDS, tail_weight
+
+        assert tail_weight(np.ones(50)) == DEFAULT_TAIL_WEIGHT, "too few pairs: default"
+        tight = np.r_[np.ones(990), np.full(10, 1.6)]
+        assert tail_weight(tight) == TAIL_WEIGHT_BOUNDS[0], "1% real tail clips to the floor"
+        fat = np.r_[np.ones(900), np.full(60, 1.6), np.full(40, 3.0)]
+        assert tail_weight(fat) == pytest.approx(0.06), "3x gaps are logger misses, not tail"
 
     def test_quantiles_monotone(self):
         mix = fit_tail_mixture(np.random.default_rng(1).lognormal(np.log(100), 0.05, 3000))

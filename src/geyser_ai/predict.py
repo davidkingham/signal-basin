@@ -16,6 +16,7 @@ from .models import (
     default_models,
     fit_tail_mixture,
     renewal_forecast,
+    tail_weight,
 )
 from .observation import hourly_logging_profile, observation_completeness_at
 from .sync import entry_revisions
@@ -74,6 +75,44 @@ def _anchor(geyser: str, db_path=DB_PATH) -> pd.Series | None:
     return last
 
 
+_tail_cache: dict[tuple[str, str], tuple[float, int]] = {}
+
+
+def logger_tail_weight(geyser: str, db_path=DB_PATH) -> tuple[float, int]:
+    """(tail weight, logger pairs it was measured on) for `geyser`.
+
+    Consecutive electronic-logger entries are the archive's one complete
+    record, so the share of their gaps past the valid band's shoulder is the
+    true right tail rather than a missed-eruption count. Regime geysers use
+    their post-major pairs only. Cached: a slowly varying historical quantity.
+    """
+    key = (geyser, str(db_path))
+    if key in _tail_cache:
+        return _tail_cache[key]
+    con = duckdb.connect(str(db_path), read_only=True)
+    try:
+        ratios = (
+            con.execute(
+                """
+            SELECT interval_min / med_interval FROM intervals
+            WHERE geyser = ? AND year_local >= 2015 AND electronic AND prev_electronic
+              AND NOT prev_minor AND med_interval > 0 AND interval_min > 0
+            """,
+                [geyser],
+            )
+            .df()
+            .iloc[:, 0]
+            .to_numpy(dtype=float)
+        )
+    except duckdb.Error:
+        ratios = np.array([])
+    finally:
+        con.close()
+    out = (tail_weight(ratios), int(len(ratios)))
+    _tail_cache[key] = out
+    return out
+
+
 def predict_geyser(
     geyser: str,
     model_name: str | None = None,
@@ -110,6 +149,9 @@ def predict_geyser(
             "prev_minor": bool(last.get("minor", False)),
             "prev_major": bool(last.get("major", False)),
             "prev_initial": bool(last.get("initial", False)),
+            # so a model can tell whether the anchor's preceding interval is
+            # the last valid one in `hist` (see models.consecutive_prev_interval)
+            "anchor_epoch": float(last["epoch"]),
             # anchor covariates come from the last observed eruption
             "prev_hour_local": int(pd.to_datetime(last["ts_local"]).hour),
             "prev_doy": int(pd.to_datetime(last["ts_local"]).dayofyear),
@@ -176,12 +218,16 @@ def predict_geyser(
     # lognormal fitted to it puts its median in the empty valley between the
     # modes. Chained missed-eruption draws must step through the real pooled
     # mixture instead.
+    # How much of the served distribution the wide tail gets: measured from
+    # the logger record where one exists, a small default where not. The old
+    # flat 0.15 over-covered every tight geyser (served 90% band catching 97%).
+    w_tail, n_tail_pairs = logger_tail_weight(geyser, db_path)
     marginal = (
         SeriesConditionalModel().fit_marginal(hist) if geyser in SERIES_GEYSERS else None
-    ) or fit_tail_mixture(intervals)
+    ) or fit_tail_mixture(intervals, w_wide=w_tail)
 
     def renewal(fit):
-        base = fit_tail_mixture(intervals, narrow=fit) or fit
+        base = fit_tail_mixture(intervals, w_wide=w_tail, narrow=fit) or fit
         # Past the first simulated eruption the branch is unknown again, so
         # chained missed-eruption draws revert to the marginal.
         return base, *renewal_forecast(
@@ -292,6 +338,10 @@ def predict_geyser(
         "n_training_intervals": int(len(hist)),
         "observation_completeness": round(p_obs, 3),
         "observation_detail": p_obs_detail,
+        # The wide-tail share the served distribution carries, and the logger
+        # record it was measured on (0 pairs = the default was used).
+        "tail_weight": round(w_tail, 3),
+        "tail_weight_logger_pairs": n_tail_pairs,
         "explain": explain,
         "expected_missed_eruptions": round(exp_missed, 2),
         "current_cycle_prob": round(p_current, 3),

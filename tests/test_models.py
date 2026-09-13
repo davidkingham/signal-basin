@@ -99,3 +99,58 @@ class TestSamplePrediction:
         ana = Prediction(dist, "t")
         for actual in (80.0, 100.0, 140.0):
             assert emp.crps(actual) == pytest.approx(ana.crps(actual), rel=0.05)
+
+
+class TestAR1LogNormal:
+    """The lag-1 model must use memory where it exists and vanish where it doesn't."""
+
+    @staticmethod
+    def _frame(intervals: np.ndarray, gap_at: int | None = None):
+        import pandas as pd
+
+        epochs = np.cumsum(intervals) * 60.0
+        if gap_at is not None:
+            # An unlogged eruption: every entry after `gap_at` shifts by one
+            # interval, so the row at `gap_at` is no longer consecutive with
+            # the one before it and would be rejected by the validity filter.
+            epochs[gap_at:] += intervals[gap_at] * 60.0
+        return pd.DataFrame({"epoch": epochs, "interval_min": intervals})
+
+    def test_beats_the_adaptive_fit_on_an_ar1_series(self):
+        from geyser_ai.models import AdaptiveLogNormalModel, AR1LogNormalModel
+
+        rng = np.random.default_rng(7)
+        n, rho = 700, 0.5
+        z = np.zeros(n)
+        for k in range(1, n):
+            z[k] = rho * z[k - 1] + rng.normal(0, 0.05)
+        x = np.exp(np.log(110.0) + z)
+        df = self._frame(x)
+        ar1, adaptive = AR1LogNormalModel(), AdaptiveLogNormalModel()
+        crps_ar1, crps_ad = [], []
+        for i in range(400, n):
+            hist, row = df.iloc[:i], df.iloc[i]
+            pa, pb = ar1.fit_predict(hist, row), adaptive.fit_predict(hist, row)
+            crps_ar1.append(pa.crps(float(row["interval_min"])))
+            crps_ad.append(pb.crps(float(row["interval_min"])))
+        assert np.mean(crps_ar1) < 0.9 * np.mean(crps_ad)
+
+    def test_falls_back_when_the_anchors_preceding_interval_was_rejected(self):
+        from geyser_ai.models import AdaptiveLogNormalModel, AR1LogNormalModel
+
+        rng = np.random.default_rng(8)
+        x = np.exp(np.log(110.0) + rng.normal(0, 0.05, 500))
+        # Row 480's anchor is preceded by a gap the filter rejected: the last
+        # valid history row does not end at the anchor.
+        df = self._frame(x, gap_at=480)
+        hist = df.iloc[:480][df.iloc[:480]["interval_min"] > 0]
+        row = df.iloc[480]
+        pa = AR1LogNormalModel().fit_predict(hist, row)
+        pb = AdaptiveLogNormalModel().fit_predict(hist, row)
+        assert pa.median() == pytest.approx(pb.median())
+        assert pa.interval(0.9) == pytest.approx(pb.interval(0.9))
+
+    def test_is_not_offered_on_branch_geysers(self):
+        names = {m.name for m in default_models("Castle")}
+        assert "ar1_lognormal" not in names
+        assert "ar1_lognormal" in {m.name for m in default_models("Daisy")}

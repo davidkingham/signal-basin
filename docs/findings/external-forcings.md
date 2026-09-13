@@ -37,6 +37,16 @@ real?"*. Several forcings below are real and still useless to us.
 
 Daisy is the **only** one of our seven where weather clears the bar.
 
+**Partly implemented without weather data (2026-09-13).** Wind persists across
+consecutive cycles, so the previous interval is a free wind proxy: after
+detrending against the local baseline, Daisy's log intervals carry a lag-1
+autocorrelation of **+0.43** (Grand +0.09, Riverside +0.07, Great Fountain
+−0.04 — Daisy alone). `ar1_lognormal` — the adaptive window with a lag-1 term
+on the log deviation — scores CRPS **2.90 against the adaptive fit's 3.17**
+on 2,000 walk-forward targets (−0.27 min, 95% CI [−0.32, −0.21], calibration
+52% / 88%) and is what Daisy serves. What memory cannot catch is the *onset*
+of a storm; that is what a wind forecast would add on top.
+
 ## Wind and air temperature → Old Faithful: NULL
 
 - **0 of 11** storms produced a response.

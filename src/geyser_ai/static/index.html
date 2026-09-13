@@ -829,8 +829,8 @@ function methodPanel(geyser){
     parts.push(`<p>Served by <code>${escText(s.model)}</code> — ${mrich(s.what)}</p>`);
     if (!s.pinned && s.winner_ahead_pct > 0){
       parts.push(`<p class="aside">The backtest's own winner here was `
-        + `<code>${escText(g.best.model)}</code>, ahead by ${s.winner_ahead_pct}% — inside the `
-        + `margin this project treats as noise, so nothing is pinned.</p>`);
+        + `<code>${escText(g.best.model)}</code>, ahead by ${s.winner_ahead_pct}% — a paired `
+        + `test on the same eruptions cannot separate them from zero, so nothing is pinned.</p>`);
     }
     parts.push(`<div class="mstats">`
       + `<div class="mstat"><b>typical miss</b><span>${mnum(s.metrics.mae)} min</span></div>`

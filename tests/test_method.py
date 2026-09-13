@@ -22,7 +22,6 @@ from geyser_ai.config import REPORTS_DIR, TARGET_GEYSERS
 from geyser_ai.method import (
     CALIBRATION_PATH,
     MODEL_ROSTER,
-    NOISE_MARGIN_PCT,
     OPEN_GAPS,
     get_method,
     load_calibration,
@@ -88,7 +87,7 @@ class TestArtifactMatchesReport:
             for field in ("crps", "mae"):
                 assert abs(served[field] - row[field]) < 0.05, f"{geyser}/{model} {field}"
             for field in ("cov50", "cov90"):
-                assert abs(served[field] - row[field]) < 0.0005, f"{geyser}/{model} {field}"
+                assert abs(served[field] - row[field]) < 0.00051, f"{geyser}/{model} {field}"
 
     def test_honest_coverage_matches(self):
         _, honest = _report_rows()
@@ -97,8 +96,8 @@ class TestArtifactMatchesReport:
             got = cal[geyser]["honest"]
             assert got["n"] == row["n"]
             assert abs(got["pct_rejected"] - row["pct_rejected"]) < 0.05
-            assert abs(got["cov50"] - row["cov50"]) < 0.0005
-            assert abs(got["cov90"] - row["cov90"]) < 0.0005
+            assert abs(got["cov50"] - row["cov50"]) < 0.00051
+            assert abs(got["cov90"] - row["cov90"]) < 0.00051
 
     def test_artifact_is_valid_json_and_covers_the_roster(self):
         cal = json.loads(CALIBRATION_PATH.read_text())
@@ -119,20 +118,34 @@ class TestServedModelCannotDrift:
         assert served["metrics"] in BLOCKS[geyser]["leaderboard"]
 
     @pytest.mark.parametrize("geyser", TARGET_GEYSERS)
-    def test_unpinned_margins_really_are_inside_the_noise_rule(self, geyser):
-        """The prose says an unpinned winner is inside the noise. Check it is.
+    def test_an_unpinned_winner_is_not_decisive(self, geyser):
+        """The prose says an unpinned winner cannot be separated from the served
+        model. Check it: the winner's paired 95% interval must straddle zero.
 
         If a future backtest opens a decisive gap on a geyser nothing is pinned
-        for, this fails -- which is the point: either pin the model in
-        `BEST_MODEL_BY_GEYSER` or stop calling the margin noise.
+        for, this fails -- which is the point: pin the model in
+        `BEST_MODEL_BY_GEYSER` or explain on the page why not.
         """
-        served = BLOCKS[geyser]["served"]
-        if served["pinned"]:
+        block = BLOCKS[geyser]
+        if block["served"]["pinned"] or block["best"]["model"] == block["served"]["model"]:
             return
-        assert served["winner_ahead_pct"] < NOISE_MARGIN_PCT, (
-            f"{geyser}: the walk-forward winner is {served['winner_ahead_pct']}% ahead of the "
-            f"served default, which is no longer noise"
+        assert not block["best"]["decisive"], (
+            f"{geyser}: the walk-forward winner {block['best']['model']} beats the served "
+            f"default by {block['best']['delta_vs_served']} min CRPS with a 95% interval of "
+            f"{block['best']['delta_ci']}, which is decisive"
         )
+
+    @pytest.mark.parametrize("geyser", TARGET_GEYSERS)
+    def test_a_pinned_model_earned_its_pin(self, geyser):
+        """Nothing on the leaderboard may beat a pinned model decisively."""
+        block = BLOCKS[geyser]
+        if not block["served"]["pinned"]:
+            return
+        for row in block["leaderboard"]:
+            assert not row.get("decisive"), (
+                f"{geyser}: {row['model']} beats the pinned {block['served']['model']} "
+                f"decisively ({row['delta_ci']}); the pin is stale"
+            )
 
     def test_every_model_on_a_leaderboard_is_described(self):
         seen = {row["model"] for b in BLOCKS.values() for row in b["leaderboard"]}

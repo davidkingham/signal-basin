@@ -342,19 +342,20 @@ class AdaptiveLogNormalModel:
         logs = np.log(x)
         return float(np.mean(logs)), max(float(np.std(logs, ddof=1)), _MIN_SCALE)
 
-    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
-        x = history["interval_min"].to_numpy(dtype=float)
-        x = x[np.isfinite(x) & (x > 0)]
+    def window_length(self, x: np.ndarray) -> int | None:
+        """How many trailing intervals of `x` the adaptive fit would use.
+
+        Changepoint cut first, then the candidate length with the best held-out
+        likelihood on the most recent block. None when there is too little data.
+        """
         if len(x) < 60:
             return None
-
         if self.use_changepoint:
             cp = _last_changepoint(x[-800:])
             if cp > 0:
                 seg = x[-800:][cp:]
                 if len(seg) >= 40:
                     x = seg
-
         # choose the window length by held-out likelihood on the most recent block
         best_w, best_ll = None, -np.inf
         if len(x) > self.holdout + 20:
@@ -369,12 +370,107 @@ class AdaptiveLogNormalModel:
                 ll = float(np.sum(stats.lognorm.logpdf(ho, s=sd, scale=np.exp(mu))))
                 if np.isfinite(ll) and ll > best_ll:
                     best_w, best_ll = w, ll
-        w = best_w or min(self.candidates[-1], len(x))
+        return best_w or min(self.candidates[-1], len(x))
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        x = history["interval_min"].to_numpy(dtype=float)
+        x = x[np.isfinite(x) & (x > 0)]
+        w = self.window_length(x)
+        if w is None:
+            return None
         fit = self._fit(x[-w:])
         if fit is None:
             return None
         mu, sd = fit
         return Prediction(stats.lognorm(s=sd, scale=np.exp(mu)), self.name)
+
+
+def consecutive_prev_interval(history: pd.DataFrame, row: pd.Series) -> float | None:
+    """The anchor's own preceding interval, only if it is a VALID one.
+
+    `history` holds valid intervals only, so the anchor's preceding interval is
+    the last history row exactly when that row ends at the anchor. Otherwise the
+    gap before the anchor was rejected (a missed eruption, a duplicate) and
+    there is nothing honest to condition on.
+    """
+    if history.empty or "epoch" not in history.columns:
+        return None
+    anchor = row.get("anchor_epoch")
+    if anchor is None or not np.isfinite(anchor):
+        try:
+            anchor = float(row["epoch"]) - float(row["interval_min"]) * 60.0
+        except (KeyError, TypeError, ValueError):
+            return None
+    last = history.iloc[-1]
+    if abs(float(last["epoch"]) - float(anchor)) > 30.0:
+        return None
+    v = float(last["interval_min"])
+    return v if np.isfinite(v) and v > 0 else None
+
+
+class AR1LogNormalModel(AdaptiveLogNormalModel):
+    """Adaptive lognormal with a lag-1 term: the previous interval predicts the next.
+
+    Daisy remembers its last interval. Detrended against the local baseline
+    (so drift cannot masquerade as memory) the lag-1 autocorrelation of its log
+    intervals is +0.43 -- almost certainly the wind effect that
+    docs/findings/external-forcings.md records as real and unimplemented,
+    reaching the model as persistence: wind that lengthened the last interval
+    is usually still blowing. No external data is needed to use it.
+
+    Within the adaptive window, regress each log interval's deviation from the
+    window mean on the previous VALID interval's deviation, and shift the
+    predicted centre by rho times the anchor's own deviation; the residual sd
+    is the predictive width. When the anchor's preceding interval was rejected
+    by the validity filter, or the window has too few consecutive pairs, this
+    is exactly the adaptive fit -- so it is safe on any roster. On the branch
+    geysers it is harmful (the preceding interval mostly encodes which branch
+    you just left, which the flag says better) and it is not offered there.
+
+    Walk-forward, Daisy, 2,000 targets (2026-09-13): CRPS 2.90 against the
+    adaptive fit's 3.17 (-8.5%, 95% CI [-0.32, -0.21] min) and the
+    previously served best_parametric's 3.25, coverage 52% / 88%.
+    """
+
+    name = "ar1_lognormal"
+
+    MIN_PAIRS = 15
+    MAX_RHO = 0.9
+
+    def fit_predict(self, history: pd.DataFrame, row: pd.Series) -> Prediction | None:
+        x = history["interval_min"].to_numpy(dtype=float)
+        ok = np.isfinite(x) & (x > 0)
+        w = self.window_length(x[ok])
+        if w is None:
+            return None
+        win = history[ok].tail(w)
+        v = win["interval_min"].to_numpy(dtype=float)
+        fit = self._fit(v)
+        if fit is None:
+            return None
+        mu, sd = fit
+        prev = consecutive_prev_interval(history, row)
+        if prev is None or "epoch" not in win.columns:
+            return Prediction(stats.lognorm(s=sd, scale=np.exp(mu)), self.name)
+
+        # Consecutive valid pairs inside the window: row k follows row k-1
+        # exactly when k-1 ends where k's interval begins.
+        ep = win["epoch"].to_numpy(dtype=float)
+        lv = np.log(v)
+        consecutive = np.abs((ep[1:] - ep[:-1]) / 60.0 - v[1:]) < 0.51
+        if consecutive.sum() < self.MIN_PAIRS:
+            return Prediction(stats.lognorm(s=sd, scale=np.exp(mu)), self.name)
+        y = lv[1:][consecutive] - mu
+        xx = lv[:-1][consecutive] - mu
+        denom = float(np.sum(xx * xx))
+        rho = (
+            float(np.clip(np.sum(xx * y) / denom, -self.MAX_RHO, self.MAX_RHO))
+            if denom > 0
+            else 0.0
+        )
+        resid_sd = max(float(np.std(y - rho * xx, ddof=1)), _MIN_SCALE)
+        centre = mu + rho * (np.log(prev) - mu)
+        return Prediction(stats.lognorm(s=resid_sd, scale=np.exp(centre)), self.name)
 
 
 class MinorConditionalModel:
@@ -673,14 +769,17 @@ SERIES_GEYSERS = frozenset({"Lion"})
 # Which model actually serves each geyser.
 #
 # `best_parametric` is the right default -- it picks lognormal against Weibull
-# per prediction by held-out likelihood, and on five of the seven geysers the
-# walk-forward winner beats it by 0.2-4.8%, which is inside the noise and not
-# worth pinning a choice on.
+# per prediction by held-out likelihood. A geyser is pinned to something else
+# only when the walk-forward winner beats the served model DECISIVELY: a paired
+# bootstrap of per-eruption CRPS differences on the identical evaluation set
+# whose 95% interval is clear of zero (`backtest.paired_bootstrap`). The old
+# rule -- "a margin under 6% is run-to-run noise" -- was never tested, and on a
+# paired test a 5.6% margin can be a certainty: the noise on a difference is
+# far smaller than the noise on either level.
 #
-# The two exceptions are not close. Both geysers with a real minor mode are
-# roughly twice as well predicted by conditioning on it, because the interval
-# following a minor is a different process rather than a noisy draw from the
-# same one:
+# The minor-mode geysers are not close. Both are roughly twice as well
+# predicted by conditioning on the flag, because the interval following a
+# minor is a different process rather than a noisy draw from the same one:
 #
 #     Old Faithful  minor_conditional  CRPS 4.7   vs best_parametric 8.9    (-47%)
 #     Castle        minor_conditional  CRPS 77.6  vs best_parametric 173.0  (-55%)
@@ -699,6 +798,25 @@ BEST_MODEL_BY_GEYSER: dict[str, str] = {
     # 27.1 (-57%, decisive). rolling_normal ties on CRPS (26.9) but loses on
     # MAE (36.6 vs 33.9).
     "Till": "adaptive_lognormal",
+    # Fountain and Beehive both drift, and the short adaptive window tracks it.
+    # The margins (5.6% and 6.1%) sat under the old noise threshold; paired on
+    # the same 500 eruptions (2026-09-13) they are decisive:
+    #     Fountain  adaptive -2.0 min CRPS, 95% CI [-3.2, -0.8], P(better) 1.000
+    #     Beehive   adaptive -7.9 min CRPS, 95% CI [-11.6, -4.4], P(better) 1.000
+    "Fountain": "adaptive_lognormal",
+    "Beehive": "adaptive_lognormal",
+    # The full 2,000-target run then did the same to Grand and Daisy, whose
+    # margins (2.7% and 1.3%) nobody would have called signal by eye:
+    #     Grand     adaptive -1.11 min CRPS, 95% CI [-1.56, -0.67]
+    #     Daisy     adaptive -0.08 min CRPS, 95% CI [-0.12, -0.04]
+    # Small in minutes, but the rule is the interval, not the size.
+    "Grand": "adaptive_lognormal",
+    # Daisy remembers its last interval (lag-1 autocorrelation +0.43 after
+    # detrending -- wind persistence, most likely). The AR(1) term on the
+    # adaptive window is the largest model gain in the project since the
+    # minor flag: CRPS 2.90 vs the adaptive fit's 3.17 on 2,000 targets,
+    # -0.27 min, 95% CI [-0.32, -0.21], calibration 52% / 88%.
+    "Daisy": "ar1_lognormal",
 }
 
 
@@ -710,6 +828,25 @@ def default_model_name(geyser: str) -> str:
 # Geysers where electronic loggers supply enough entries for a per-entry-type
 # fit to have data on both sides of the split.
 LOGGER_HEAVY_GEYSERS = frozenset({"Great Fountain", "Daisy", "Castle", "Grand"})
+
+
+# Share of the served distribution given to the wide tail component when a
+# geyser has no logger record to measure it from; see `tail_weight`. The old
+# value was 0.15 for every geyser, which the logger-complete records put at
+# roughly ten times the true tail mass on the tight geysers: the served 90%
+# band covered 97% on Old Faithful, Daisy, Castle and Riverside at +2-3% CRPS.
+DEFAULT_TAIL_WEIGHT = 0.05
+TAIL_WEIGHT_BOUNDS = (0.02, 0.15)
+# The wide component's minimum width in log space, ~1.4x the median at its
+# 95th percentile. The validity filter censors everything past 1.75x, so no fit
+# to the surviving data can represent a genuinely long interval; without this
+# floor a model that thinks "late" is impossible always prefers "we missed one".
+TAIL_MIN_LOG_SD = 0.20
+# And its maximum: a 50/50 series mixture has a log-IQR spanning both modes
+# (Lion mid-series: 2.85), and a tail that wide puts mass at ten minutes and
+# at two weeks. e^1 either side of the median is as much regime risk as a
+# tail component can honestly claim.
+TAIL_MAX_LOG_SD = 1.0
 
 
 class TailMixture:
@@ -729,7 +866,7 @@ class TailMixture:
     impossible.
     """
 
-    def __init__(self, narrow, wide, w_wide: float = 0.15) -> None:
+    def __init__(self, narrow, wide, w_wide: float = DEFAULT_TAIL_WEIGHT) -> None:
         self.narrow, self.wide = narrow, wide
         self.w = float(np.clip(w_wide, 0.0, 1.0))
 
@@ -759,14 +896,45 @@ class TailMixture:
 
     def ppf(self, q):
         q = np.asarray(q, dtype=float)
-        lo = min(self.narrow.ppf(1e-6), self.wide.ppf(1e-6))
+        lo = max(min(self.narrow.ppf(1e-6), self.wide.ppf(1e-6)), 1e-9)
         hi = max(self.narrow.ppf(1 - 1e-6), self.wide.ppf(1 - 1e-6))
-        grid = np.linspace(max(lo, 1e-9), hi, 4096)
+        # Geometric grid. A linear one is only as fine as its span allows, and
+        # the span is set by the wide component's extreme quantile: with a
+        # log-sd of 2 it reached a million minutes, so 4096 points were 280
+        # minutes apart and Lion's served median read 171 min against a true
+        # 90. Intervals live on a log scale; so does the grid now.
+        grid = np.geomspace(lo, hi, 4096)
         return np.interp(q, self.cdf(grid), grid)
 
 
-def fit_tail_mixture(intervals: np.ndarray, window: int = 100, w_wide: float = 0.15, narrow=None):
-    """Lognormal on the recent window, widened by one fitted on the long history.
+def tail_weight(ratios: np.ndarray, min_pairs: int = 200) -> float:
+    """Tail weight measured from a complete record, or the default without one.
+
+    `ratios` are raw gap / local median for consecutive ELECTRONIC-LOGGER
+    entries -- the one part of the archive where a long gap is a long interval
+    rather than a missed eruption. The weight is the share of those gaps past
+    1.4x the median (where a lognormal fitted to the valid band starts to run
+    out of mass) and under 2.5x (past which a logger's own rare misses live),
+    clipped to `TAIL_WEIGHT_BOUNDS`. Measured 2015+: Old Faithful 0.2%, Daisy
+    1.5%, Grand 1.8%, Great Fountain 2.8%, Fountain 6.3%, Artemisia 11% -- the
+    last two have real fat tails the single 0.15 was right about and the rest do
+    not.
+    """
+    r = np.asarray(ratios, dtype=float)
+    r = r[np.isfinite(r) & (r > 0)]
+    if len(r) < min_pairs:
+        return DEFAULT_TAIL_WEIGHT
+    share = float(np.mean((r > 1.4) & (r <= 2.5)))
+    return float(np.clip(share, *TAIL_WEIGHT_BOUNDS))
+
+
+def fit_tail_mixture(
+    intervals: np.ndarray,
+    window: int = 100,
+    w_wide: float = DEFAULT_TAIL_WEIGHT,
+    narrow=None,
+):
+    """Lognormal on the recent window, widened by a heavier-tailed component.
 
     `narrow` optionally supplies an already-fitted distribution to widen instead
     of fitting one here -- this is how a *conditional* model's branch fit keeps
@@ -774,6 +942,14 @@ def fit_tail_mixture(intervals: np.ndarray, window: int = 100, w_wide: float = 0
     on the narrow one's median, so widening never moves the median; substituting
     an unconditionally-fitted narrow component for a conditional one is exactly
     the bug documented in docs/findings/live-scoreboard.md.
+
+    The wide component's width is twice the narrow component's own log-spread,
+    floored at `TAIL_MIN_LOG_SD`. It used to take the log-sd of the last 2000
+    pooled intervals, which on a geyser with two modes is the distance BETWEEN
+    the modes, not regime risk: Lion's came out at 1.99, Castle's 0.95, Old
+    Faithful's 0.45, and a post-major Old Faithful 90% band of 88-126 min was
+    served as 81-137. On a unimodal geyser that term never exceeded the floor,
+    so dropping it changes nothing there.
     """
     x = np.asarray(intervals, dtype=float)
     x = x[np.isfinite(x) & (x > 0)]
@@ -786,14 +962,13 @@ def fit_tail_mixture(intervals: np.ndarray, window: int = 100, w_wide: float = 0
         )
     if len(x) < window * 3:
         return narrow
-    long = np.log(x[-2000:])
-    # Floor the width. The validity filter deliberately censors the right tail
-    # (anything past 1.75x the local median is treated as a missed eruption), so
-    # a distribution fitted to what survives cannot represent a genuinely long
-    # interval at all -- and a model that thinks "late" is impossible will always
-    # prefer "we missed one". 0.20 in log space puts the wide component's 95th
-    # percentile near 1.4x the median, inside the range the filter still accepts.
-    wide_sd = max(float(np.std(long, ddof=1)), float(np.std(recent, ddof=1)) * 2.0, 0.20)
+    # Width from the narrow component's OWN spread (log-IQR, which equals the
+    # log-sd for a lognormal), so a conditional branch is widened around its
+    # branch and a series mixture around its modes -- never around the pooled
+    # window, whose spread on a bimodal geyser is the gap between the modes.
+    q25, q75 = float(narrow.ppf(0.25)), float(narrow.ppf(0.75))
+    narrow_sd = (np.log(q75) - np.log(q25)) / 1.349 if q25 > 0 and q75 > q25 else 0.0
+    wide_sd = float(np.clip(narrow_sd * 2.0, TAIL_MIN_LOG_SD, TAIL_MAX_LOG_SD))
     wide = stats.lognorm(s=wide_sd, scale=float(narrow.ppf(0.5)))
     return TailMixture(narrow, wide, w_wide)
 
@@ -922,6 +1097,8 @@ def default_models(geyser: str) -> list[Model]:
         AdaptiveLogNormalModel(),
         WeibullAFTModel(window=1500, refit_every=250),
     ]
+    if geyser not in MINOR_MODE_GEYSERS and geyser not in SERIES_GEYSERS:
+        models.append(AR1LogNormalModel())
     if geyser == "Old Faithful":
         models.append(DurationConditionalModel(window=400))
     if geyser in MINOR_MODE_GEYSERS:

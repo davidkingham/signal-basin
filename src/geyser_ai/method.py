@@ -37,11 +37,16 @@ ISSUES_URL = f"{REPO_URL}/issues"
 FINDINGS_URL = f"{REPO_URL}/blob/main/docs/findings"
 REPORT_URL = f"{REPO_URL}/blob/main/reports/calibration_report.md"
 
-# A margin this small is run-to-run noise on a 3-year walk-forward, not
-# evidence. It is the rule that decides whether a geyser gets a pinned model or
-# keeps the default, and the page states it rather than leaving the reader to
-# infer why an apparent winner is not being served.
-NOISE_MARGIN_PCT = 6.0
+# The rule that decides whether a geyser gets a pinned model or keeps the
+# default, stated on the page rather than left for the reader to infer. It used
+# to be a percentage ("a margin under 6% is run-to-run noise"), which was never
+# tested; on the identical evaluation set a paired bootstrap of the per-eruption
+# CRPS differences is the honest test, and a 5.6% margin can be a certainty.
+PINNING_RULE = (
+    "A geyser is pinned to the walk-forward winner only when a paired bootstrap of the "
+    "per-eruption CRPS differences, winner minus served, on the identical evaluation set has "
+    "a 95% interval clear of zero. A leaderboard percentage on its own decides nothing."
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Scoreboard methodology. Lives here with the rest of the prose; `service.py`
@@ -59,9 +64,11 @@ METHODOLOGY = (
     "the ones it replaced are discarded rather than counted as misses. "
     "Coverage is the share of scored eruptions for which this source had a prediction open, out "
     "of the eruptions any source predicted. "
-    "Eruptions that land more than three window widths past a prediction are dropped for every "
-    "source alike: in crowd-sourced data that usually means an eruption went unlogged in "
-    "between, and charging that to the forecaster would be measuring the observers instead."
+    "Eruptions that land more than three window widths -- or more than half the geyser's own "
+    "cycle, whichever is longer -- past a prediction are dropped for every source alike: in "
+    "crowd-sourced data that usually means an eruption went unlogged in between, and charging "
+    "that to the forecaster would be measuring the observers instead. A second entry within "
+    "fifteen minutes of another is the same eruption logged twice and is not scored either."
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -98,6 +105,16 @@ MODEL_ROSTER: dict[str, dict[str, str]] = {
             "Detects the most recent changepoint in the interval series and selects the "
             "training-window length by held-out likelihood. Built for geysers whose cycle has "
             "drifted, where a long window trains on a regime that no longer exists."
+        ),
+    },
+    "ar1_lognormal": {
+        "label": "adaptive lognormal + memory",
+        "what": (
+            "The adaptive lognormal with a lag-1 term: the previous interval's deviation from "
+            "the window mean shifts the next prediction's centre. Built for Daisy, whose "
+            "intervals carry a +0.43 lag-1 autocorrelation after detrending — almost "
+            "certainly wind persistence. Falls back to the plain adaptive fit when the "
+            "anchor's own preceding interval was rejected by the validity filter."
         ),
     },
     "minor_conditional": {
@@ -409,17 +426,25 @@ SECTIONS: list[dict[str, Any]] = [
         "eyebrow": "model choice",
         "title": "How the served model is chosen",
         "body": [
-            "The walk-forward winner is not automatically the model that serves. On most "
-            "geysers the leaderboard is separated by a couple of percent, which is run-to-run "
-            "noise on a three-year window, and pinning a production choice on that would be "
-            "overfitting the leaderboard rather than improving the forecast. Those geysers "
-            "keep the default, `best_parametric`, and this page shows both numbers so you can "
-            "see exactly what that decision costs.",
-            "Three geysers are pinned to something else, because their process has real state "
-            "and the margin is decisive rather than noisy: Old Faithful and Castle to the "
-            "minor-conditional model, Lion to the series model. Till is pinned to the "
-            "adaptive model because its cycle has drifted and long-window fits train on a "
-            "regime that no longer exists.",
+            "The walk-forward winner is not automatically the model that serves. On several "
+            "geysers the leaderboard is separated by a couple of percent, and a percentage on "
+            "its own cannot say whether that is signal. Every model is therefore scored "
+            "against the served model on the identical eruptions and the difference is "
+            "bootstrapped: a geyser is pinned to its winner only when the 95% interval of "
+            "that difference is clear of zero. Where it is not, the geyser keeps the "
+            "default, `best_parametric`, and this page shows both numbers and the interval so "
+            "you can see exactly what the decision rests on.",
+            "Eight geysers are pinned. Old Faithful and Castle to the minor-conditional model "
+            "and Lion to the series model, because their process has real state and the "
+            "margins are enormous. Till, Fountain, Beehive and Grand to the adaptive model, "
+            "because their cycles drift and a short window tracks it, and Daisy to the "
+            "adaptive model with a lag-1 term, because its intervals carry memory. Four of "
+            "those "
+            "sat under the old six-percent threshold and were left on the default; the "
+            "paired test showed every one was a certainty (Fountain −2.0 min CRPS, 95% CI "
+            "[−3.2, −0.8]; Beehive −7.9, [−11.6, −4.4]; Grand −1.1, [−1.6, −0.7]; Daisy "
+            "−0.08, [−0.12, −0.04]). Riverside, Great Fountain, Artemisia, Lone Star and "
+            "Little Squirt keep the default because their winner's interval straddles zero.",
             "This distinction is load-bearing and was once got wrong in production: the "
             "serving path defaulted every geyser to `best_parametric` while the published "
             "table claimed otherwise, which quietly discarded a 47% improvement on Old "
@@ -690,9 +715,10 @@ GEYSER_NOTES: dict[str, dict[str, Any]] = {
     "Grand": {
         "summary": "The most-watched of the big fountain geysers, and a flat leaderboard.",
         "why": (
-            "No model separates from the pack. The walk-forward winner is inside the noise "
-            "margin against the default, so Grand keeps the default rather than pinning a "
-            "choice on a coin flip."
+            "The leaderboard looks flat — the adaptive model is 2.7% ahead of the default — "
+            "but on the full 2,000-eruption paired test that margin is decisive (−1.1 min "
+            "CRPS, 95% CI [−1.6, −0.7]), so Grand is pinned to it. Nothing here would have "
+            "been pinned by eye; the interval did it."
         ),
         "data": (
             "46% webcam, 16% logger. Well observed by the standards of this set, which is why "
@@ -708,30 +734,36 @@ GEYSER_NOTES: dict[str, dict[str, Any]] = {
         ],
     },
     "Daisy": {
-        "summary": "The tightest geyser served, and the one with a known, unbuilt improvement.",
+        "summary": "The tightest geyser served, and the only one that remembers its last interval.",
         "why": (
-            "Daisy's interval is so regular that model choice barely registers — the whole "
-            "leaderboard sits within a few tenths of a minute — so it keeps the default. What "
-            "matters here is the data cleaning: Daisy's median drifted from 142 minutes in "
-            "2019 to 111 in 2026, and that drift is what generation 2 of the validity filter "
-            "exists for."
+            "Daisy's intervals are autocorrelated: after detrending against the local "
+            "baseline, a long interval is followed by a long one (lag-1 correlation +0.43), "
+            "which is what wind persistence looks like from inside the archive — wind that "
+            "lengthened the last interval is usually still blowing. The served model is the "
+            "adaptive lognormal with a lag-1 term on that deviation, and it is the largest "
+            "model gain in the project since the minor flag: −0.27 min CRPS against the "
+            "adaptive fit, 95% CI [−0.32, −0.21], about 8.5%, with calibration intact. When "
+            "the anchor's own preceding interval was rejected by the validity filter the "
+            "term switches off and the plain adaptive fit is served. The data cleaning "
+            "still matters more: Daisy's median drifted from 142 minutes in 2019 to 111 in "
+            "2026, and that drift is what generation 2 of the validity filter exists for."
         ),
         "data": "58% webcam, 24% logger — one of the better-observed geysers in the set.",
         "gaps": [
-            "**Wind is real, large, and not implemented — the single biggest known gap in the "
-            "project.** Published work found 8 of 11 wind storms pushed Daisy's interval past "
-            "+1σ, modelling a swing from 135 min at 2 m/s to 180 min at 8 m/s, and the effect "
-            "was independently replicated at Strokkur over ~650,000 eruptions. Our own data "
-            "agrees: a 19.4-minute seasonal swing, longest in February and shortest in August, "
-            "which is about 4.5× Daisy's current MAE. The data-source decision is already made "
-            "(ERA5 for training, HRRR for live inference); the model is not built.",
+            "**Wind itself is still not an input.** Published work found 8 of 11 wind storms "
+            "pushed Daisy's interval past +1σ, modelling a swing from 135 min at 2 m/s to 180 "
+            "min at 8 m/s, and the effect was independently replicated at Strokkur over "
+            "~650,000 eruptions. The lag-1 term captures the part of that which persists from "
+            "one interval to the next; a wind forecast would also catch the onset of a storm, "
+            "which memory cannot. The data-source decision is already made (ERA5 for "
+            "training, HRRR for live inference); that model is not built.",
         ],
     },
     "Riverside": {
         "summary": "Regular, and badly hurt by observation gaps.",
         "why": (
-            "A flat leaderboard: the winner and the default are separated by less than the "
-            "noise margin, so it keeps the default."
+            "A flat leaderboard: the winner's paired interval against the default straddles "
+            "zero, so it keeps the default."
         ),
         "data": "62% webcam, 22% logged while in eruption.",
         "gaps": [
@@ -780,9 +812,11 @@ GEYSER_NOTES: dict[str, dict[str, Any]] = {
         "summary": "The worst interval model in the set, carrying the best live signal in the set.",
         "why": (
             "Beehive's interval genuinely is that uncertain: the dashboard-style rolling "
-            "baseline is the leaderboard winner, and every more elaborate model is within a few "
-            "percent of it. What changes the answer here is not the interval model at all — it "
-            "is the Indicator."
+            "baseline and the adaptive lognormal tie at the top, and it is pinned to the "
+            "adaptive model because both beat the long-window default decisively (−7.9 min "
+            "CRPS, 95% CI [−11.6, −4.4]) — Beehive drifts, and a short window follows it. "
+            "What changes the answer here is not the interval model at all — it is the "
+            "Indicator."
         ),
         "data": (
             "48% webcam, and only 8% of raw gaps are rejected by the validity filter — the "
@@ -804,9 +838,11 @@ GEYSER_NOTES: dict[str, dict[str, Any]] = {
         "summary": "Added by a sweep of all 491 logged geysers; nobody else predicts it.",
         "why": (
             "Selected on interval tightness and logging density — log-sd 0.207 on a 305-minute "
-            "median, the same tier as Castle and Beehive — with a unimodal distribution and no "
-            "drift. The leaderboard winner is ahead of the default but inside the noise margin, "
-            "so it keeps the default."
+            "median, the same tier as Castle and Beehive — with a unimodal distribution. It "
+            "is pinned to the adaptive model: the winner was 5.6% ahead of the default, which "
+            "the old noise threshold dismissed, and the paired test (−2.0 min CRPS, 95% CI "
+            "[−3.2, −0.8] on the same 500 eruptions) says the short window genuinely tracks "
+            "something the 150-interval fit smooths over."
         ),
         "data": "56% logger-recorded, no webcam coverage.",
         "gaps": [
@@ -907,8 +943,8 @@ GEYSER_NOTES: dict[str, dict[str, Any]] = {
     "Little Squirt": {
         "summary": "A ~58-hour cycle everybody had overlooked, with the cleanest record in the set.",
         "why": (
-            "No special machinery was needed. The leaderboard winner is ahead of the default by "
-            "less than the noise margin, so it keeps the default."
+            "No special machinery was needed. The leaderboard winner's paired interval against "
+            "the default straddles zero, so it keeps the default."
         ),
         "data": (
             "91% of raw gaps are true single intervals — the cleanest observation record here — "
@@ -1094,7 +1130,8 @@ def _winner_ahead_pct(served: float, best: float) -> float | None:
 
     Expressed against the served model's own score -- "the winner is 5.6% ahead
     of what we serve" -- which is the framing `docs/findings/model-results.md`
-    uses and the one the noise rule is written in.
+    uses. Whether that is signal is a separate question the paired interval
+    answers; the percentage alone never decides a pin.
     """
     if not served:
         return None
@@ -1178,11 +1215,16 @@ def _geyser_block(name: str, cal: dict[str, Any]) -> dict[str, Any]:
         "metrics": served,
     }
     block["best"] = {"model": best["model"], "crps": best["crps"]}
-    # What the noise rule costs, stated rather than implied: how much CRPS the
+    # What the pinning rule costs, stated rather than implied: how much CRPS the
     # served model gives up against the leaderboard winner, and how it stands
     # against the dashboard-style baseline gazers already have.
     if served:
         block["served"]["winner_ahead_pct"] = _winner_ahead_pct(served["crps"], best["crps"])
+        # The paired test the pinning decision actually rests on: the winner's
+        # CRPS difference against the served model and its 95% interval.
+        block["best"]["delta_vs_served"] = best.get("delta_vs_served")
+        block["best"]["delta_ci"] = best.get("delta_ci")
+        block["best"]["decisive"] = bool(best.get("decisive", False))
         if baseline:
             block["served"]["beats_baseline_pct"] = _beats_baseline_pct(
                 served["crps"], baseline["crps"]
@@ -1219,7 +1261,7 @@ def get_method(geyser: str | None = None) -> dict[str, Any]:
         "geysers": blocks,
         "open_gaps": OPEN_GAPS,
         "links": LINKS,
-        "noise_margin_pct": NOISE_MARGIN_PCT,
+        "pinning_rule": PINNING_RULE,
     }
 
 

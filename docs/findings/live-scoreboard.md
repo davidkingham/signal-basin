@@ -149,7 +149,9 @@ are near-impossible and p_current stays high; a plausibly-missed one reads
 "likely unlogged" instead. Left open, deliberately: the tail mixture gives
 "27 h late" a ~4% prior against Castle's empirical 0.3% — the wide component
 may be too heavy for the long-interval geysers, but that is a calibration
-question for the backtest, not a badge question.
+question for the backtest, not a badge question. *(Answered 2026-09-13: it was
+too heavy everywhere the logger record could measure it, by about 7×; see
+"The served distribution is not the backtested one" in model-results.md.)*
 
 ## The third catch: the Indicator nowcast was blind in production (2026-08-10)
 
@@ -217,6 +219,71 @@ Lion and Artemisia** — the geysers neither the NPS nor GeyserTimes attempt —
 and explanations like Great Fountain's "the last eruption was probably not
 seen". Lion is served; Fountain (a series geyser with a Morning interaction)
 and Artemisia (a plain ~2–3 day interval geyser) are not on the roster yet.
+
+## The fifth catch: the scoreboard was scoring its own censoring rule (2026-09-13)
+
+A methods audit split the last 200 scored rows per geyser at "actual landed
+more than half a cycle past our time" — the signature of an eruption GT never
+received in between:
+
+| geyser | rows ≥ ½ cycle late | our MAE, all | our MAE, clean | NPS clean | GN clean | NPS had a prediction on the late rows |
+|---|---:|---:|---:|---:|---:|---:|
+| Old Faithful | 21 (10%) | 25.2 | **7.5** | 5.3 | 6.5 | 57% |
+| Daisy | 14 (7%) | 16.7 | **6.2** | 5.4 | 8.1 | 36% |
+| Grand | 11 (12%) | 103.1 | **62.5** | 83.5 | 64.5 | 91% |
+| Castle | 7 (16%) | 317.7 | **147.4** | 97.2 | 43.2 | 86% |
+| Great Fountain | 18 (37%) | 325.6 | **74.6** | — | 79.0 | — |
+
+`scoring.py` promised to drop any pairing more than three window widths past
+the prediction, but its floor was a fixed **six hours**, so the rule never
+bound on a geyser whose band is under two hours: a Daisy eruption one
+unlogged cycle late (108 min against a 23-minute band) was scored as +108.
+And the censoring was not symmetric in practice — the NPS re-anchors from
+Visitor Center observations GT never receives, so on those rows its earlier
+prediction had usually been superseded and it was simply absent, while ours
+(keyed to the anchor, issued once) sat open and took the full-cycle charge.
+The clean-row gap to the NPS on Old Faithful and Daisy is one to two minutes,
+which is what the backtest promised.
+
+**Fix:** the horizon floor is now half the geyser's own cycle
+(`HORIZON_CYCLE_FRACTION`, cycle supplied by `service._cycle_seconds`), the
+6-hour value survives only when no cycle is known, and entries within fifteen
+minutes of another are collapsed as the same eruption logged twice
+(`DUPLICATE_WINDOW_SECONDS`; one Daisy row had scored −97 min on a 5.6-minute
+lead). Both counters are in the ledger stats. Already-scored rows are not
+rewritten — the record is append-only — so the 30-day numbers carry the old
+rule until they roll off.
+
+## The sixth catch: production trained on a six-week-old snapshot (2026-09-13)
+
+`intervals` is built only at ingest; the live sync fed only the anchor. On
+2026-09-13 `/api/health` showed `archive_newest_utc` 2026-08-03 with 3,224
+synced rows sitting unused for training, so every "recent window" model was
+fitting the weeks before 3 August. Cutting each backtest target's history off
+N days early prices it:
+
+| geyser | fresh | 21 d | 42 d (where production was) | 90 d |
+|---|---:|---:|---:|---:|
+| Daisy | 3.29 | 3.68 | 3.90 (+18%) | 4.61 |
+| Grand | 39.5 | 41.1 | 43.1 (+9%) | 46.8 |
+| Beehive | 128.1 | 132.6 | 137.2 (+7%) | 144.4 |
+| Fountain | 36.4 | 37.9 | 39.0 (+7%) | 42.0 |
+| Old Faithful / Castle | 4.61 / 82.5 | — | 4.62 / 82.8 (≈0) | — |
+
+Larger than any model change in the calibration report, and it grew every
+day nobody ran `publish-snapshot.sh`. Daisy's live clean MAE (6.2 against a
+4.3 backtest) is about what this predicts.
+
+**Fix:** `chain.recent_intervals` continues the archive chain through the
+synced entries with ingest's own rules (cycle-event filter, 60-second dedupe,
+anchor-side covariates) and validates each gap against the archive's last
+local baseline carried forward, per regime. `load_intervals` and the nowcast's
+`load_valid_intervals` extend by default; the backtest and report pass
+`extend_recent=False` so the archive stays the reproducible record.
+`/api/health` now reports `training_newest_utc` beside `archive_newest_utc`.
+Regression-tested in `tests/test_chain.py` with entries that exist only in
+the sync table, including the post-minor regime baseline and a precursor
+minor that must stay out of the chain.
 
 ## Footnotes for data-quality.md
 

@@ -491,18 +491,25 @@ function servedStats(g){
 }
 
 /* Why this model and not the leaderboard winner — stated, with the number. */
-function choiceLine(g, noise){
+function fmtSigned(v){ return (v > 0 ? "+" : "") + Number(v).toFixed(2); }
+function choiceLine(g){
   const s = g.served;
   if (!s) return "";
   const bits = [];
+  const ci = g.best && g.best.delta_ci
+    ? ` (paired against the served model on the same eruptions: ${fmtSigned(g.best.delta_vs_served)} min CRPS, `
+      + `95% interval ${fmtSigned(g.best.delta_ci[0])} to ${fmtSigned(g.best.delta_ci[1])})`
+    : "";
   if (s.pinned){
-    bits.push(`Pinned to <code>${esc(s.model)}</code> in code because the margin is decisive `
-      + `rather than noisy — it is the walk-forward winner here.`);
+    bits.push(`Pinned to <code>${esc(s.model)}</code> in code because the margin over the default `
+      + `is decisive — a paired 95% interval clear of zero — not merely large.`);
   } else if (s.winner_ahead_pct > 0){
     bits.push(`Serves the default <code>${esc(s.model)}</code>. The walk-forward winner was `
-      + `<code>${esc(g.best.model)}</code>, ahead by <b>${s.winner_ahead_pct}%</b> — inside the `
-      + `${noise}% margin this project treats as run-to-run noise, so nothing is pinned. `
-      + `That difference is what the decision costs, and it is shown rather than hidden.`);
+      + `<code>${esc(g.best.model)}</code>, ahead by <b>${s.winner_ahead_pct}%</b>${ci}. `
+      + (g.best && g.best.decisive
+          ? `That interval is clear of zero, so this geyser is due to be pinned at the next regeneration. `
+          : `That interval straddles zero, so nothing is pinned. `)
+      + `The difference is what the decision costs, and it is shown rather than hidden.`);
   } else {
     bits.push(`Serves the default <code>${esc(s.model)}</code>, which is also the walk-forward `
       + `winner here.`);
@@ -543,7 +550,7 @@ function geyserBlock(g, noise){
        + `<p>${rich(g.why)}</p>`;
   }
   if (s){
-    b += choiceLine(g, noise) + servedStats(g);
+    b += choiceLine(g) + servedStats(g);
     b += `<h5>Every model, same eruptions</h5>` + leaderboard(g);
   }
   if (g.nowcast){
@@ -683,7 +690,6 @@ function wireContact(){
 
 /* ── page assembly ──────────────────────────────────────── */
 function render(doc){
-  const noise = doc.noise_margin_pct;
   const toc = [...doc.sections.map(s => ({href: "#" + s.id, label: s.title})),
                {href: "#geysers", label: "Every geyser"},
                {href: "#open", label: "Where the gaps are"},

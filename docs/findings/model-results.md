@@ -238,7 +238,9 @@ claim, nothing to score.
 
 ```python
 {"Old Faithful": "minor_conditional", "Castle": "minor_conditional",
- "Lion": "series_conditional"}
+ "Lion": "series_conditional", "Till": "adaptive_lognormal",
+ "Fountain": "adaptive_lognormal", "Beehive": "adaptive_lognormal",
+ "Grand": "adaptive_lognormal", "Daisy": "adaptive_lognormal"}
 # everything else falls back to best_parametric
 ```
 
@@ -252,14 +254,45 @@ two geysers:
 | Old Faithful | 8.9 | **4.7** | −47% |
 | Castle | 173.0 | **77.6** | −55% |
 
-The other six keep the default deliberately. Their walk-forward winners beat
-`best_parametric` by **0.2–5.5%** (Riverside 12.8 vs 12.8; Great Fountain 45.6
-vs 45.7; Daisy 3.1 vs 3.2; Grand 38.9 vs 40.0; Beehive 119.8 vs 126.3; Fountain
-35.2 vs 37.3). That is inside the noise, and pinning a production choice on it
-would be overfitting the leaderboard rather than improving the forecast.
+### The noise rule was wrong, and it cost Fountain and Beehive a year (2026-09-13)
 
-**If you regenerate the backtest, update this map — but only where the margin is
-decisive.**
+Until 2026-09-13 the rule was: a winner ahead of the default by under ~6% is
+"inside run-to-run noise", so nothing is pinned. Under it Riverside (12.8 vs
+12.8), Great Fountain (45.6 vs 45.7), Daisy (3.1 vs 3.2), Grand (38.9 vs
+40.0), **Beehive (119.8 vs 126.3) and Fountain (35.2 vs 37.3)** all kept the
+default. The rule was asserted, never measured — and it confuses two very
+different noises. The noise on a CRPS *level* over three years is indeed a few
+percent. The noise on the *difference* between two models scored on the
+identical eruptions is far smaller, because most of what makes an eruption
+hard is shared. A paired bootstrap of the per-eruption differences (4,000
+resamples, 500 evenly spaced targets) settled it:
+
+| geyser | candidate − served | mean Δ CRPS | 95% CI | P(candidate better) |
+|---|---|---:|---:|---:|
+| Fountain | adaptive_lognormal − best_parametric | −2.01 min (−5.6%) | [−3.17, −0.82] | 1.000 |
+| Beehive | adaptive_lognormal − best_parametric | −7.93 min (−6.1%) | [−11.58, −4.40] | 1.000 |
+| Daisy (n=1500) | adaptive_lognormal − best_parametric | −0.11 min (−3.5%) | [−0.16, −0.07] | 1.000 |
+| Grand (n=500) | adaptive_lognormal − best_parametric | −0.52 min (−1.3%) | [−1.35, +0.33] | 0.888 |
+| **Grand (n=1,994, full run)** | adaptive_lognormal − best_parametric | −1.11 min (−2.7%) | [−1.56, −0.67] | — |
+| **Daisy (n=2,000, full run)** | adaptive_lognormal − best_parametric | −0.08 min (−2.5%) | [−0.12, −0.04] | — |
+
+Fountain, Beehive, Grand and Daisy are now pinned to `adaptive_lognormal`;
+all four drift, and the short window follows. Note Grand: on 500 targets the
+interval straddled zero, on the full 1,994 it did not — which is exactly why
+the rule is the interval on the full evaluation set and not a glance at the
+percentage. Daisy's margin is tiny in minutes and a larger gain is waiting
+there (an AR(1) term on the adaptive window, −11%), but a decisive interval
+is pinned regardless of its size.
+
+**The rule now:** `backtest.paired_bootstrap` scores every model against the
+served model on the same eruptions; the report prints the interval beside
+every margin; `calibration.json` carries it; and a geyser is pinned only when
+the 95% interval is clear of zero. `tests/test_method.py` fails in both
+directions — an unpinned winner that turns decisive, or a pinned model that
+something beats decisively.
+
+**If you regenerate the backtest, update this map — but only where the interval
+says so.**
 
 ## The model roster
 
@@ -343,6 +376,35 @@ the branch decays on its own. An early version hard-switched and produced 141 mi
 of error by insisting "any second now" long after the Indicator had plainly
 failed.
 
+### Daisy remembers its last interval (2026-09-13)
+
+Lag-1 autocorrelation of log intervals over the last three years, both
+intervals valid and detrended against the local baseline so drift cannot
+masquerade as memory: **Daisy +0.43**, Little Squirt +0.27, Lion in-series
++0.22, Beehive +0.21, Castle post-major +0.19; Grand +0.09, Riverside +0.07,
+Great Fountain −0.04, Old Faithful −0.16. Only Daisy pays for it —
+`sd × sqrt(1 − r²)` says a 10% narrower residual there and under 3%
+anywhere else.
+
+`ar1_lognormal` is the adaptive lognormal with a lag-1 term: within the
+adaptive window, each log interval's deviation from the window mean is
+regressed on the previous *valid* interval's deviation, and the predicted
+centre shifts by ρ × the anchor's own deviation. When the anchor's preceding
+interval was rejected by the validity filter the term switches off and the
+model is exactly the adaptive fit, so it is safe on any roster; it is not
+offered on the branch geysers, where the preceding interval mostly encodes
+which branch you just left (Castle +14%, Old Faithful +5% when tried).
+
+| Daisy, 2,000 targets | CRPS | MAE | 50% | 90% | vs ar1 (paired) |
+|---|---:|---:|---:|---:|---:|
+| **ar1_lognormal** | **2.90** | **3.92** | 52% | 88% | — |
+| adaptive_lognormal | 3.17 | 4.33 | 50% | 88% | +0.27 min, 95% CI [+0.21, +0.32] |
+| best_parametric | 3.25 | 4.45 | 54% | 90% | +0.35, [+0.28, +0.42] |
+
+Daisy is pinned to it. This is almost certainly the wind effect
+external-forcings.md records as real and unimplemented, arriving as
+persistence rather than as a weather feed; it needs no external data.
+
 ## Losses, documented at equal length
 
 ### The covariate survival model does not earn its complexity
@@ -419,6 +481,58 @@ missed ones (mean 813 vs median 708 is a heavy right tail).
 The implied model, `entry_conditional`, **does not help**: Great Fountain 46.0 vs
 45.6 for plain lognormal. Kept in the roster and reported rather than quietly
 dropped.
+
+## The served distribution is not the backtested one — and it was too wide (2026-09-13)
+
+Production never serves a model's raw fit. `predict` widens it with a tail
+component (`fit_tail_mixture`) so that running late stays plausible and the
+renewal forecast does not jump a cycle the moment a watched geyser passes its
+median. The backtest scores the raw fit; nothing in `reports/` scored what a
+visitor sees. The audit did, and the widening was costing calibration:
+
+| geyser | raw fit CRPS | served (w=0.15) | served 90% band covered | served now (measured w) | covers |
+|---|---:|---:|---:|---:|---:|
+| Old Faithful | 4.92 | 5.07 (+2.9%) | **97.4%** | +0.1% | 93.7% |
+| Daisy | 3.22 | 3.29 (+2.1%) | **97.5%** | +0.0% | 88.5% |
+| Riverside | 12.62 | 12.89 (+2.2%) | **96.6%** | +0.4% | 92.8% |
+| Castle | 81.0 | 83.7 (+3.3%) | **96.9%** | +0.0% | 85.0% |
+| Artemisia | 177.3 | 177.7 (+0.2%) | 92.0% | +0.1% | 90.8% |
+
+Three things were wrong, each with its own fix:
+
+1. **The weight (0.15) was one number for every geyser.** Consecutive
+   electronic-logger entries are the archive's one complete record — a long
+   gap there is a long interval, not a missed eruption — and they put the
+   true mass past 1.4× the median at Old Faithful 0.2%, Daisy 1.5%, Grand
+   1.8%, Great Fountain 2.8%, **Fountain 6.3%, Artemisia 11%**. The last two
+   have the fat tail the flat 0.15 was right about; the rest do not.
+   `models.tail_weight` now measures it per geyser from those pairs (clipped
+   to 2–15%, default 5% where fewer than 200 logger pairs exist), and the
+   prediction reports `tail_weight` and the pair count it rests on.
+2. **The width came from the pooled 2000-interval history**, which on a
+   bimodal geyser is the distance *between* the modes: Lion 1.99, Castle
+   0.95, Old Faithful 0.45 in log space. A post-major Old Faithful 90% band
+   of 88–126 min was served as 81–137 — 55 min wide on the scoreboard against
+   the NPS's 24, for the same hit rate. The width is now twice the narrow
+   component's own log-spread, floored at 0.20 and capped at 1.0.
+3. **`TailMixture.ppf` used a linear 4096-point grid** up to the wide
+   component's 1−10⁻⁶ quantile. With log-sd 2 that is ~1.15 million minutes,
+   so the grid was ~280 min coarse and Lion's served base median read 171.5
+   min against the branch fit's 90.0 (its 90% low edge read 17 min). Only the
+   `overdue` flag consumed it in production — the renewal forecast samples
+   from `rvs` — but any future reader of the served median would have been
+   wrong. The grid is geometric now.
+
+Walk-forward on the served distribution after the fix (400 targets per
+geyser): CRPS within 0.0–0.4% of the raw fit everywhere, medians identical,
+90% coverage 85–93%. The Castle coda in live-scoreboard.md ("the wide
+component may be too heavy for the long-interval geysers") is answered: it
+was, by about 7×.
+
+**Still open:** the backtest still scores the raw fit. Scoring the served
+distribution as its own leaderboard row is the natural next step, and the
+elapsed-time behaviour (the card moving as a geyser runs late) has no offline
+score outside the Beehive nowcast harness.
 
 ## Missed eruptions at prediction time
 

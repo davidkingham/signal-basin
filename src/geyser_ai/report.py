@@ -14,9 +14,10 @@ import pandas as pd
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from .backtest import ScoreRow  # noqa: E402
+from .backtest import BOOTSTRAP_RESAMPLES, ScoreRow  # noqa: E402
 from .config import DB_PATH, FIGURES_DIR, REPORTS_DIR, TARGET_GEYSERS  # noqa: E402
 from .method import CALIBRATION_PATH  # noqa: E402
+from .models import default_model_name  # noqa: E402
 
 # Fixed categorical order, validated colorblind-safe (OKLab CVD dE >= 8 adjacent).
 # Assigned by model identity and never cycled, so a model keeps its color across
@@ -34,6 +35,8 @@ MODEL_COLORS = {
     # 9th series: no new hue is generated, this one reuses slot 1 at a darker
     # step and is always direct-labelled in the legend.
     "entry_conditional": "#184f95",
+    # 10th: slot 7 at a darker step, direct-labelled like the 9th.
+    "ar1_lognormal": "#005c00",
 }
 MODEL_ORDER = list(MODEL_COLORS)
 INK = "#1a1a19"
@@ -172,7 +175,7 @@ def plot_example_density(geyser: str, db_path=DB_PATH) -> str | None:
     from .backtest import load_intervals
     from .models import default_models
 
-    df = load_intervals(geyser, db_path)
+    df = load_intervals(geyser, db_path, extend_recent=False)
     if len(df) < 400:
         return None
     i = len(df) - 1
@@ -248,6 +251,14 @@ def write_calibration_json(
                 "mae": round(s.mae_median, 1),
                 "cov50": round(s.cover50, 4),
                 "cov90": round(s.cover90, 4),
+                # Paired against the served model on the same eruptions; the
+                # method page states the interval instead of a noise threshold.
+                "delta_vs_served": (
+                    round(s.delta_vs_served, 2) if s.delta_vs_served is not None else None
+                ),
+                "delta_ci": [round(v, 2) for v in s.delta_ci] if s.delta_ci else None,
+                "p_better": round(s.p_better, 3) if s.p_better is not None else None,
+                "decisive": s.decisive,
             }
         )
     for g, hc in honest.items():
@@ -358,8 +369,18 @@ def write_report(
 
     # Per-geyser winners and the honest comparison against the baseline.
     lines.append("## Which model wins\n")
-    lines.append("| Geyser | Best by CRPS | CRPS | Baseline CRPS | Improvement |")
-    lines.append("|---|---|---:|---:|---:|")
+    lines.append(
+        "The last two columns are a paired bootstrap of per-eruption CRPS differences, "
+        "winner minus the model actually served, on the identical evaluation set "
+        f"({BOOTSTRAP_RESAMPLES:,} resamples). A geyser is pinned to its winner only when "
+        "that 95% interval is clear of zero -- **decisive** -- not when a percentage looks "
+        "large. Where the winner *is* the served model the columns are empty.\n"
+    )
+    lines.append(
+        "| Geyser | Best by CRPS | CRPS | Served | Baseline CRPS | Improvement "
+        "| Winner − served (min) | 95% CI |"
+    )
+    lines.append("|---|---|---:|---|---:|---:|---:|---:|")
     for g in geysers:
         rows = sorted([s for s in scores if s.geyser == g], key=lambda r: r.crps)
         if not rows:
@@ -370,9 +391,17 @@ def write_report(
             if base and base.crps > 0
             else "n/a"
         )
+        win = rows[0]
+        if win.delta_ci:
+            delta = f"{win.delta_vs_served:+.2f}"
+            ci = f"[{win.delta_ci[0]:+.2f}, {win.delta_ci[1]:+.2f}]" + (
+                " **decisive**" if win.decisive else ""
+            )
+        else:
+            delta, ci = "", ""
         lines.append(
-            f"| {g} | {rows[0].model} | {_fmt(rows[0].crps, 1)} "
-            f"| {_fmt(base.crps, 1) if base else 'n/a'} | {imp} |"
+            f"| {g} | {win.model} | {_fmt(win.crps, 1)} | {default_model_name(g)} "
+            f"| {_fmt(base.crps, 1) if base else 'n/a'} | {imp} | {delta} | {ci} |"
         )
 
     # Data-driven honesty section: call out where the winner is still miscalibrated,

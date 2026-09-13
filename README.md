@@ -98,6 +98,7 @@ Community-flagged `questionable` entries are excluded from the `eruptions` view.
 | `lognormal` / `weibull` | Rolling-window MLE fits |
 | `best_parametric` | Picks lognormal vs Weibull per prediction by held-out likelihood |
 | `adaptive_lognormal` | Changepoint detection + held-out selection of the window length |
+| `ar1_lognormal` | Daisy: the adaptive window plus a lag-1 term — the previous interval's deviation shifts the next centre (wind persistence, measured from the archive) |
 | `weibull_aft` | lifelines Weibull AFT with covariates, refit periodically |
 | `duration_lognormal` | Old Faithful only: short/long preceding-duration split |
 | `minor_conditional` | Castle & Old Faithful: conditions on whether the previous eruption was a *minor* |
@@ -127,7 +128,7 @@ question, answered below and, per geyser with the numbers beside it, at
 |---|---|---:|---:|---:|---:|
 | Old Faithful | `minor_conditional` | 4.7 | 6.4 | 58% | 93% |
 | Grand | `adaptive_lognormal` | 38.9 | 54.4 | 47% | 91% |
-| Daisy | `adaptive_lognormal` | 3.1 | 4.3 | 51% | 88% |
+| Daisy | `ar1_lognormal` | 2.9 | 3.9 | 52% | 88% |
 | Riverside | `adaptive_lognormal` | 12.8 | 17.5 | 53% | 91% |
 | Castle | `minor_conditional` | 77.6 | 101.6 | 61% | 87% |
 | Great Fountain | `lognormal` | 45.6 | 62.9 | 55% | 91% |
@@ -145,19 +146,27 @@ days); otherwise the dashboard shows a planning card with interval statistics
 and the decision rule a visitor can actually use.
 
 **A geyser is served by the winner above only where the margin is decisive** —
-see `models.BEST_MODEL_BY_GEYSER`, which pins four: the two with a real minor
-mode, where conditioning on it roughly halves CRPS (Old Faithful 8.9 → 4.7,
-Castle 173.0 → 77.6 against `best_parametric`); Lion, where the series model
-takes 15% off; and Till, whose drifted cycle costs the long-window parametric
-fits 57%. Everything else keeps the default `best_parametric`, because there the
-winner is ahead by only 0.2–5.6% — inside run-to-run noise, and pinning a
-production choice on it would be overfitting the leaderboard rather than
-improving the forecast.
+and "decisive" is a test, not a threshold: a paired bootstrap of the
+per-eruption CRPS differences, winner minus served, on the identical evaluation
+set, whose 95% interval must be clear of zero (`backtest.paired_bootstrap`; the
+interval is printed beside every margin in the report). `models.BEST_MODEL_BY_GEYSER`
+pins eight: the two with a real minor mode, where conditioning on it roughly
+halves CRPS (Old Faithful 8.9 → 4.7, Castle 173.0 → 77.6 against
+`best_parametric`); Lion, where the series model takes 15% off; and Till,
+Fountain, Beehive and Grand, whose cycles drift and whose short adaptive
+window tracks it; and Daisy to that window plus a lag-1 term, because its
+intervals carry memory (CRPS 3.17 → 2.90, CI [−0.32, −0.21]). The last four are the cautionary tale: for a year the rule
+was "a margin under 6% is run-to-run noise", their 1.3–6.1% margins sat under
+it, and the paired test then showed every one to be a certainty (Fountain −2.0
+min CRPS, 95% CI [−3.2, −0.8]; Beehive −7.9, [−11.6, −4.4]; Grand −1.1, [−1.6,
+−0.7]; Daisy −0.08, [−0.12, −0.04]). The noise on a *difference* measured on
+the same eruptions is far smaller than the noise on either level. Everything
+else keeps the default because its winner's interval straddles zero.
 
-That means the served model is *not* the top row on nine of thirteen geysers,
-and the difference is published rather than smoothed over: each card's "how this
-is modelled" panel names the model it actually runs, its own scores, and how far
-ahead the leaderboard winner was.
+That means the served model is *not* the top row on several geysers, and the
+difference is published rather than smoothed over: each card's "how this is
+modelled" panel names the model it actually runs, its own scores, how far ahead
+the leaderboard winner was, and the interval that says whether that is signal.
 
 ### What actually moved the numbers
 
@@ -482,8 +491,8 @@ which the backtest writes, and derived facts (which model serves, how far behind
 the winner it is, whether a nominal interval is miscalibrated) are computed from
 that artifact and from `models.BEST_MODEL_BY_GEYSER`. `tests/test_method.py`
 asserts the artifact against the published report row by row, asserts the page
-names the model production actually runs, and fails if a margin the page calls
-"noise" stops being noise. The endpoint touches no database, so it answers in a
+names the model production actually runs, fails if an unpinned winner's paired
+interval turns decisive, and fails if anything beats a pinned model decisively. The endpoint touches no database, so it answers in a
 millisecond and keeps answering while a cold container is still pulling its
 snapshot.
 
@@ -571,9 +580,14 @@ Three more rules, all applied identically to every source:
   be plain unfair.
 - **Eruptions beyond a generous horizon are not scored at all.** If nobody logs
   Riverside overnight, the next logged eruption may be two cycles after the one a
-  prediction was aimed at. Any pairing landing more than three window widths past
-  the predicted time is dropped for everyone, and counted, so the censoring is
-  visible rather than silent.
+  prediction was aimed at. Any pairing landing more than three window widths —
+  or half the geyser's own cycle, whichever is longer — past the predicted time
+  is dropped for everyone, and counted, so the censoring is visible rather than
+  silent. (The floor used to be a fixed six hours, which never let the rule
+  bind on a tight geyser: a Daisy eruption one unlogged cycle late was scored
+  as +108 min against a 23-minute band. That was most of the published gap to
+  the NPS on Old Faithful and Daisy.) A second entry within fifteen minutes of
+  another is the same eruption logged twice and is not scored.
 
 `scoring.py` is pure — dataclasses in, dataclasses out, no database, no clock,
 no network — because the matching rules are where a three-way comparison is won
