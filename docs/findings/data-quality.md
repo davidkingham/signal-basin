@@ -261,6 +261,25 @@ Publish both columns, always.
   not `eruptionForecastNumber` as documented.
 - **Datetimes** are Unix epoch by default; add `?iso=1` for ISO 8601. Fields that
   are genuinely absent come back as empty strings, not null.
+- **The backcountry geysers are hidden from every list endpoint (2026-09-08).**
+  `/geysers` returns 481 names; the archive has 491, and **71 archive geysers
+  never appear in the list** — essentially the whole backcountry set: Overhanging
+  (West Thumb lakeshore), Minute Man, Taurus Spring, Lion-Shoshone, Bead-Shoshone,
+  Mound, Rustic, Composite, Pit-Heart Lake, Imperial, Seismic, "Other Geyser -
+  Backcountry", and so on. Lone Star, Black Hole, Perforated Cone and Union *are*
+  listed. The filter is applied to entries too, not just the roster: for
+  2026-08-01/02 the archive holds 3 Lone Star and 3 Mound entries; `entries/
+  {from}/{to}` returns the Lone Star ones and no Mound. `entries_recent` shares
+  the filter (a week of it, 1,498 entries, contained no unlisted name).
+  `entries/{id}` still resolves a hidden geyser's entry — but the ID has to come
+  from the archive. Consequences: **the live sync can never see a backcountry
+  entry**, so a live card for any of them is impossible without a grant from
+  GeyserTimes (asked about, not asked for, in the outreach draft); and the
+  archive's `Lone Star` rows are the only backcountry stream with both listing
+  and volume. Overhanging itself is 29 entries since 2015, ~1–5 opportunistic
+  sightings a year, mostly one observer from the lake — nothing to fit. This
+  reads as deliberate resource protection mirroring the app's backcountry
+  opt-in, so treat it as policy rather than a bug.
 - **Entries are edited after the fact, and the API has no history — only the
   current row plus `timeUpdated`.** Flags are the usual casualty: a Lion entry
   logged at 17:39 as a series initial (`ini=1`) was un-flagged at 19:39 when no

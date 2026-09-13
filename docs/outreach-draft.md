@@ -180,6 +180,15 @@ true I'll say so just as loudly.
   changed, or something you'd rather I didn't publish? I'll follow your lead.
 - Any chance of archiving predictions nightly, as in §1? It's the one piece of
   data that currently can't be recovered after the fact.
+- A small one about the API: the list endpoints (`/geysers`, `entries_recent`,
+  `entries/{from}/{to}`) omit the backcountry geysers — 71 names that are in the
+  nightly archive (Shoshone, Heart Lake, Overhanging, Imperial…) never appear in
+  them, though individual entries still resolve by ID. I assume that's
+  deliberate resource protection, mirroring the app's backcountry opt-in, and
+  I'm not asking for it to change. I'd just like to confirm it's intended, and
+  to know whether an opt-in exists for API consumers, so I don't build on the
+  wrong assumption. (I have no plans to publish backcountry predictions; only
+  Lone Star has enough data, and it's already the one I serve.)
 - Longer term: would you have any interest in computer-vision eruption logging
   from the public webcam (night and winter coverage), or LLM-assisted extraction
   of structured observations from historical records?
