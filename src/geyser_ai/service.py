@@ -875,6 +875,21 @@ def get_health(db_path=DB_PATH) -> dict[str, Any]:
             ).fetchone()
         except duckdb.Error:
             n_recent, newest_recent = 0, None
+        # The newest interval a served model can actually train on. Before the
+        # live chain extension this was the archive's edge -- 41 days stale on
+        # 2026-09-13 -- and nothing on this endpoint said so.
+        try:
+            from .chain import recent_intervals
+
+            training_newest = newest
+            for g in TARGET_GEYSERS:
+                tail = recent_intervals(g, con)
+                if len(tail) and tail["is_valid"].any():
+                    training_newest = max(
+                        training_newest or 0, int(tail.loc[tail["is_valid"], "epoch"].max())
+                    )
+        except duckdb.Error:
+            training_newest = newest
     finally:
         con.close()
 
@@ -890,6 +905,11 @@ def get_health(db_path=DB_PATH) -> dict[str, Any]:
             dt.datetime.fromtimestamp(newest, tz=dt.UTC).isoformat() if newest else None
         ),
         "recent_sync_rows": int(n_recent),
+        "training_newest_utc": (
+            dt.datetime.fromtimestamp(training_newest, tz=dt.UTC).isoformat()
+            if training_newest
+            else None
+        ),
         "newest_eruption_utc": (
             dt.datetime.fromtimestamp(latest, tz=dt.UTC).isoformat() if latest else None
         ),

@@ -16,7 +16,15 @@ import numpy as np
 import pandas as pd
 
 from .config import DB_PATH, TARGET_GEYSERS
-from .models import LogNormalModel, default_models
+from .models import LogNormalModel, default_model_name, default_models
+
+# Paired bootstrap of per-eruption CRPS differences against the served model.
+# "A margin under 6% is noise" was the pinning rule for a year and was never
+# tested; on the identical evaluation set the noise on a DIFFERENCE is far
+# smaller than the noise on either level, and a 5.6% margin on Fountain turned
+# out to be a 95% CI of [-3.2, -0.8] minutes. So the rule is now the interval.
+BOOTSTRAP_RESAMPLES = 4000
+BOOTSTRAP_SEED = 20260913
 
 
 @dataclass
@@ -30,32 +38,50 @@ class ScoreRow:
     cover90: float
     mean_median_pred: float
     pit: list[float] = field(default_factory=list)
+    # Against the model this geyser actually serves, on the same eruptions:
+    # mean CRPS difference in minutes (negative = this model is better), its
+    # 95% bootstrap interval, and the share of resamples in which it wins.
+    # None for the served model itself.
+    delta_vs_served: float | None = None
+    delta_ci: tuple[float, float] | None = None
+    p_better: float | None = None
+
+    @property
+    def decisive(self) -> bool:
+        """Better than the served model with a 95% interval clear of zero."""
+        return self.delta_ci is not None and self.delta_ci[1] < 0
 
 
-def load_intervals(geyser: str, db_path=DB_PATH) -> pd.DataFrame:
-    """Valid intervals for one geyser, chronologically ordered."""
-    con = duckdb.connect(str(db_path), read_only=True)
-    try:
-        df = con.execute(
-            """
-            SELECT geyser, ts_utc, ts_local, epoch, interval_min, prev_interval_min,
-                   prev_duration_seconds, duration_seconds, hour_local, month_local,
-                   year_local, prev_hour_local, prev_doy,
-                   prev_webcam, prev_electronic, prev_approximate, prev_in_eruption,
-                   prev_minor, prev_major, prev_initial, minor, major, initial,
-                   webcam, electronic, approximate, in_eruption, near_start, exact
-            FROM intervals
-            WHERE geyser = ? AND is_valid
-            ORDER BY epoch
-            """,
-            [geyser],
-        ).df()
-    finally:
-        con.close()
+def paired_bootstrap(
+    scored: pd.DataFrame, model: str, reference: str, n: int = BOOTSTRAP_RESAMPLES
+) -> tuple[float, tuple[float, float], float] | None:
+    """(mean diff, 95% CI, P(model better)) of per-eruption CRPS, model - reference."""
+    p = scored.pivot(index="idx", columns="model", values="crps")
+    if model not in p.columns or reference not in p.columns:
+        return None
+    d = (p[model] - p[reference]).dropna().to_numpy()
+    if len(d) < 30:
+        return None
+    rng = np.random.default_rng(BOOTSTRAP_SEED)
+    boots = rng.choice(d, size=(n, len(d)), replace=True).mean(axis=1)
+    lo, hi = np.percentile(boots, [2.5, 97.5])
+    return float(d.mean()), (float(lo), float(hi)), float(np.mean(boots < 0))
+
+
+def load_intervals(geyser: str, db_path=DB_PATH, extend_recent: bool = True) -> pd.DataFrame:
+    """Valid intervals for one geyser, chronologically ordered.
+
+    With `extend_recent` the archive chain is continued through the entries the
+    live sync has pulled since the snapshot (see `chain`), so a served model
+    trains on this week rather than on the week the snapshot was published.
+    The backtest passes False: the archive is the reproducible record.
+    """
+    df = load_all_intervals(geyser, db_path, extend_recent=extend_recent)
+    df = df[df["is_valid"].astype(bool)].drop(columns=["med_interval", "is_valid"])
     return df.reset_index(drop=True)
 
 
-def load_all_intervals(geyser: str, db_path=DB_PATH) -> pd.DataFrame:
+def load_all_intervals(geyser: str, db_path=DB_PATH, extend_recent: bool = False) -> pd.DataFrame:
     """Every interval including filter-rejected ones, with `is_valid` retained.
 
     Needed for two things the valid-only view cannot answer: estimating how
@@ -79,6 +105,12 @@ def load_all_intervals(geyser: str, db_path=DB_PATH) -> pd.DataFrame:
             """,
             [geyser],
         ).df()
+        if extend_recent:
+            from .chain import recent_intervals
+
+            tail = recent_intervals(geyser, con)
+            if not tail.empty:
+                df = pd.concat([df, tail[df.columns]], ignore_index=True)
     finally:
         con.close()
     return df.reset_index(drop=True)
@@ -154,7 +186,7 @@ def backtest_geyser(
 
     Returns per-model scores and the raw per-prediction records (for plotting).
     """
-    df = load_intervals(geyser, db_path)
+    df = load_intervals(geyser, db_path, extend_recent=False)
     if len(df) < min_train + 50:
         print(f"  {geyser}: only {len(df)} valid intervals -- skipping")
         return [], pd.DataFrame()
@@ -226,7 +258,9 @@ def backtest_geyser(
         scored = recs
 
     out: list[ScoreRow] = []
+    served = default_model_name(geyser)
     for name, g in scored.groupby("model"):
+        boot = paired_bootstrap(scored, str(name), served) if name != served else None
         out.append(
             ScoreRow(
                 geyser=geyser,
@@ -238,6 +272,9 @@ def backtest_geyser(
                 cover90=float(g["in90"].mean()),
                 mean_median_pred=float(g["median"].mean()),
                 pit=g["pit"].tolist(),
+                delta_vs_served=boot[0] if boot else None,
+                delta_ci=boot[1] if boot else None,
+                p_better=boot[2] if boot else None,
             )
         )
     out.sort(key=lambda r: r.crps)
@@ -257,9 +294,15 @@ def run_backtest(
         if not recs.empty:
             all_recs.append(recs)
         for s in scores:
+            vs = (
+                f"  vs served {s.delta_vs_served:+.2f} [{s.delta_ci[0]:+.2f}, {s.delta_ci[1]:+.2f}]"
+                + ("  DECISIVE" if s.decisive else "")
+                if s.delta_ci
+                else ""
+            )
             print(
                 f"    {s.model:<20} CRPS={s.crps:7.2f}  MAE={s.mae_median:7.2f}  "
-                f"50%={s.cover50:5.1%}  90%={s.cover90:5.1%}  n={s.n}"
+                f"50%={s.cover50:5.1%}  90%={s.cover90:5.1%}  n={s.n}{vs}"
             )
         print()
     recs = pd.concat(all_recs, ignore_index=True) if all_recs else pd.DataFrame()

@@ -120,16 +120,16 @@ def load_eruption_epochs(geyser: str, db_path=DB_PATH, since_year: int = 2010) -
     return df["epoch"].to_numpy(dtype=np.int64)
 
 
-def load_valid_intervals(geyser: str, db_path=DB_PATH) -> np.ndarray:
-    con = duckdb.connect(str(db_path), read_only=True)
-    try:
-        df = con.execute(
-            "SELECT epoch, interval_min FROM intervals WHERE geyser=? AND is_valid ORDER BY epoch",
-            [geyser],
-        ).df()
-    finally:
-        con.close()
-    return df.to_numpy()
+def load_valid_intervals(geyser: str, db_path=DB_PATH, extend_recent: bool = True) -> np.ndarray:
+    """(epoch, interval_min) for every valid interval, live-extended by default.
+
+    Same reader as the prediction path, so the nowcast's base fit sees the
+    synced entries too; the nowcast backtest passes False.
+    """
+    from .backtest import load_intervals
+
+    df = load_intervals(geyser, db_path, extend_recent=extend_recent)
+    return df[["epoch", "interval_min"]].to_numpy()
 
 
 def _fit_base(intervals: np.ndarray, window: int = 100) -> stats.rv_continuous | None:
@@ -304,7 +304,7 @@ def nowcast_backtest(
     and the whole value sits in the minutes after the Indicator starts.
     """
     own = load_eruption_epochs(geyser, db_path)
-    iv = load_valid_intervals(geyser, db_path)
+    iv = load_valid_intervals(geyser, db_path, extend_recent=False)
     if len(own) < 400 or len(iv) < 300:
         return {}
     neigh = {n: load_eruption_epochs(n, db_path) for n in NEIGHBORS.get(geyser, [])}
