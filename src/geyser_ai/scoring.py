@@ -37,7 +37,23 @@ from typing import Any
 # How far past its predicted time an eruption may land and still be treated as
 # the eruption that prediction was about.
 MATCH_HORIZON_FACTOR = 3.0
+# The floor is a fraction of the geyser's own cycle, not a fixed number of
+# hours. A fixed 6-hour floor never let the width rule bind on any geyser whose
+# band is under two hours, so a Daisy eruption one unlogged cycle late (108
+# min against a 23-min band) was scored as a +108 miss -- exactly the case the
+# horizon exists to drop. Measured on the first month of the live ledger it
+# was most of the published gap to the NPS: Old Faithful MAE 25.2 with those
+# rows, 7.5 without (NPS 5.3); Daisy 16.7 vs 6.2 (NPS 5.4); Great Fountain
+# 326 vs 75. Half a cycle is the natural line: past it, the next cycle's
+# eruption is the better explanation than a very late one.
+HORIZON_CYCLE_FRACTION = 0.5
+# Used only when the caller cannot say how long the geyser's cycle is.
 MIN_MATCH_HORIZON_SECONDS = 6 * 3600
+# Two entries this close are one eruption logged twice (the archive's ingest
+# collapses 60 s; live entries by different observers land minutes apart).
+# Scoring the second one produced a Daisy row at -97 min with a 5.6-minute
+# lead. No served geyser has a real interval anywhere near this short.
+DUPLICATE_WINDOW_SECONDS = 15 * 60
 
 # A prediction nothing ever matched is abandoned after this long.
 STALE_OPEN_SECONDS = 2 * 24 * 3600
@@ -119,6 +135,7 @@ class MatchResult:
     superseded: int = 0
     expired: int = 0
     beyond_horizon: int = 0
+    duplicates: int = 0
 
 
 def _in_range(value: int, low: int | None, high: int | None) -> bool | None:
@@ -127,12 +144,35 @@ def _in_range(value: int, low: int | None, high: int | None) -> bool | None:
     return low <= value <= high
 
 
-def _horizon_seconds(pred: LoggedPrediction) -> float:
+def _horizon_seconds(pred: LoggedPrediction, cycle_seconds: float | None) -> float:
     """How late an eruption may be before we stop believing it is the right one."""
+    floor = (
+        HORIZON_CYCLE_FRACTION * cycle_seconds
+        if cycle_seconds and cycle_seconds > 0
+        else float(MIN_MATCH_HORIZON_SECONDS)
+    )
     if pred.window_open_epoch is not None and pred.window_close_epoch is not None:
         width = max(pred.window_close_epoch - pred.window_open_epoch, 0)
-        return max(MATCH_HORIZON_FACTOR * width, MIN_MATCH_HORIZON_SECONDS)
-    return float(MIN_MATCH_HORIZON_SECONDS)
+        return max(MATCH_HORIZON_FACTOR * width, floor)
+    return floor
+
+
+def _drop_duplicates(eruptions: list[Eruption]) -> tuple[list[Eruption], int]:
+    """Collapse entries of the same geyser closer than `DUPLICATE_WINDOW_SECONDS`.
+
+    The earlier entry stands; the later one is the second observer.
+    """
+    kept: list[Eruption] = []
+    last: dict[str, int] = {}
+    dropped = 0
+    for e in sorted(eruptions, key=lambda e: e.epoch):
+        prev = last.get(e.geyser)
+        if prev is not None and e.epoch - prev < DUPLICATE_WINDOW_SECONDS:
+            dropped += 1
+            continue
+        last[e.geyser] = e.epoch
+        kept.append(e)
+    return kept, dropped
 
 
 def score_one(pred: LoggedPrediction, eruption: Eruption) -> ScoredPrediction:
@@ -169,14 +209,20 @@ def match_and_score(
     now_epoch: int,
     already_scored: set[tuple[str, int]] | None = None,
     stale_open_seconds: int = STALE_OPEN_SECONDS,
+    cycle_seconds: dict[str, float] | None = None,
 ) -> MatchResult:
     """Pair every eruption with the prediction each source had open for it.
 
     `already_scored` holds `(source, eruption_id)` pairs that have been scored on
     a previous pass, so re-running over an overlapping window of eruptions --
     which the five-minute sync does constantly -- cannot double-count.
+
+    `cycle_seconds` gives each geyser's typical interval, which sets the floor
+    of the match horizon (see `HORIZON_CYCLE_FRACTION`). Without it the fixed
+    `MIN_MATCH_HORIZON_SECONDS` applies.
     """
     already = already_scored or set()
+    cycles = cycle_seconds or {}
     result = MatchResult()
 
     # Predictions grouped by who made them and about what.
@@ -185,8 +231,9 @@ def match_and_score(
         groups.setdefault((pred.source, pred.geyser), []).append(pred)
 
     consumed: set[str] = set()
+    eruptions, result.duplicates = _drop_duplicates(eruptions)
 
-    for eruption in sorted(eruptions, key=lambda e: e.epoch):
+    for eruption in eruptions:
         for (source, geyser), preds in groups.items():
             if geyser != eruption.geyser:
                 continue
@@ -203,7 +250,8 @@ def match_and_score(
                 consumed.add(p.key)
             result.superseded += len(candidates) - 1
 
-            if eruption.epoch > winner.predicted_epoch + _horizon_seconds(winner):
+            horizon = _horizon_seconds(winner, cycles.get(geyser))
+            if eruption.epoch > winner.predicted_epoch + horizon:
                 # Almost certainly an unlogged eruption in between. Not scored,
                 # for anyone, rather than blamed on the forecaster.
                 result.beyond_horizon += 1

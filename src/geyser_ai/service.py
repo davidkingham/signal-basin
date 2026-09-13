@@ -540,6 +540,41 @@ def _eruptions_for_scoring(db_path=DB_PATH) -> list[Eruption]:
     return out
 
 
+_cycle_cache: dict[str, dict[str, float]] = {}
+
+
+def _cycle_seconds(db_path=DB_PATH) -> dict[str, float]:
+    """Typical interval per target geyser, in seconds, for the match horizon.
+
+    The median of the last three years' valid intervals. For a bimodal geyser
+    (Lion) this lands in the short mode, which is the conservative choice: the
+    horizon floor is half of it, so a genuine series gap after a short-mode
+    prediction is dropped as "next cycle" rather than scored as hours late.
+    Cached per database: it is a slowly varying quantity.
+    """
+    key = str(db_path)
+    if key in _cycle_cache:
+        return _cycle_cache[key]
+    out: dict[str, float] = {}
+    try:
+        con = duckdb.connect(str(db_path), read_only=True)
+        try:
+            rows = con.execute(
+                """
+                SELECT geyser, median(interval_min) FROM intervals
+                WHERE is_valid AND ts_utc > now() - INTERVAL 3 YEAR
+                GROUP BY geyser
+                """
+            ).fetchall()
+        finally:
+            con.close()
+        out = {g: float(m) * 60.0 for g, m in rows if m}
+    except duckdb.Error:
+        out = {}
+    _cycle_cache[key] = out
+    return out
+
+
 def update_scoreboard(
     our_predictions: dict[str, Any] | None = None, db_path=DB_PATH
 ) -> dict[str, Any]:
@@ -575,6 +610,7 @@ def update_scoreboard(
         _eruptions_for_scoring(db_path),
         now_epoch=int(dt.datetime.now(dt.UTC).timestamp()),
         already_scored=led.already_scored(),
+        cycle_seconds=_cycle_seconds(db_path),
     )
     led.apply(result)
     led.flush()

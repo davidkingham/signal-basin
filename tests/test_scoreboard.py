@@ -181,6 +181,47 @@ class TestCensoringAndExpiry:
         res = match_and_score([wide], [erupt(epoch=NOW + 9 * HOUR)], NOW + 10 * HOUR)
         assert len(res.scored) == 1, "9h is inside 3x a 4h window"
 
+    def test_the_horizon_floor_is_half_the_geysers_cycle_not_six_hours(self):
+        """Live catch, 2026-09-13: a Daisy eruption one unlogged cycle late was scored +108.
+
+        Daisy's 90% band is ~23 min, so 3x the width is 69 min -- but the old
+        fixed six-hour floor let a 108-minute-late eruption through as a miss.
+        With the cycle supplied, half of Daisy's ~108-minute cycle is the floor.
+        """
+        p = pred(
+            "geyser_ai",
+            geyser="Daisy",
+            predicted=NOW + HOUR,
+            window=(NOW + HOUR - 690, NOW + HOUR + 690),
+        )
+        one_cycle_late = erupt(geyser="Daisy", epoch=NOW + HOUR + 108 * 60)
+        with_cycle = match_and_score(
+            [p], [one_cycle_late], NOW + 4 * HOUR, cycle_seconds={"Daisy": 108 * 60}
+        )
+        assert with_cycle.scored == [] and with_cycle.beyond_horizon == 1
+        without = match_and_score([p], [one_cycle_late], NOW + 4 * HOUR)
+        assert len(without.scored) == 1, "without a cycle the legacy six-hour floor still applies"
+
+    def test_a_merely_late_eruption_inside_half_a_cycle_is_still_scored(self):
+        p = pred(
+            "geyser_ai",
+            geyser="Daisy",
+            predicted=NOW + HOUR,
+            window=(NOW + HOUR - 690, NOW + HOUR + 690),
+        )
+        late = erupt(geyser="Daisy", epoch=NOW + HOUR + 40 * 60)
+        res = match_and_score([p], [late], NOW + 4 * HOUR, cycle_seconds={"Daisy": 108 * 60})
+        assert [s.signed_error_min for s in res.scored] == [40.0]
+
+    def test_a_second_entry_minutes_after_the_first_is_the_same_eruption(self):
+        """Two observers, one eruption: the second entry must not score as -97 min."""
+        p = pred("geyser_ai", geyser="Daisy", predicted=NOW + HOUR)
+        first = erupt(geyser="Daisy", eid=1, epoch=NOW + HOUR)
+        again = erupt(geyser="Daisy", eid=2, epoch=NOW + HOUR + 5 * 60)
+        res = match_and_score([p], [again, first], NOW + 4 * HOUR)
+        assert [s.eruption_id for s in res.scored] == [1]
+        assert res.duplicates == 1
+
     def test_a_prediction_nothing_ever_matched_expires(self):
         old = pred("nps", issued=NOW, predicted=NOW + HOUR)
         res = match_and_score([old], [], now_epoch=NOW + 10 * 24 * HOUR)

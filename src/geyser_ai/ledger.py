@@ -117,7 +117,12 @@ class Ledger:
         self.open: dict[str, LoggedPrediction] = {}
         self.scored: list[ScoredPrediction] = []
         self.started_utc: str | None = None
-        self.stats: dict[str, int] = {"superseded": 0, "expired": 0, "beyond_horizon": 0}
+        self.stats: dict[str, int] = {
+            "superseded": 0,
+            "expired": 0,
+            "beyond_horizon": 0,
+            "duplicates": 0,
+        }
         self.error: str | None = None
 
     # -- persistence ----------------------------------------------------
@@ -230,6 +235,7 @@ class Ledger:
             self.stats["superseded"] += result.superseded
             self.stats["expired"] += result.expired
             self.stats["beyond_horizon"] += result.beyond_horizon
+            self.stats["duplicates"] = self.stats.get("duplicates", 0) + result.duplicates
             self._trim()
 
     def _trim(self) -> None:
