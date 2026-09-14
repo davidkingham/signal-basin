@@ -1,6 +1,6 @@
 [project]
 name = "geyser-ai"
-version = "0.1.0"
+version = "0.2.0"
 description = "Signal Basin: Probabilistic next-eruption prediction for Yellowstone geysers, built on public GeyserTimes data."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
