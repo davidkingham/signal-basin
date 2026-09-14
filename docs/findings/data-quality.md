@@ -184,6 +184,42 @@ and went from "log-sd 2.16 at a 12-minute median" to a 12-hour cycle at
 log-sd 0.072 — the tightest long-interval geyser in the project, hidden
 entirely inside data-cleaning assumptions.
 
+### Generation 7 — considered and rejected: a per-geyser ceiling (2026-09-13)
+
+The methods audit flagged that the 1.75× ceiling deletes real eruptions on
+Fountain and Artemisia, citing 4.9% and 6.8% of their logger-complete
+intervals sitting at 1.5–2.5× the local median. Measured properly before
+touching the SQL — consecutive electronic-logger pairs only, since a long gap
+between two logger entries is a long interval rather than a missed eruption
+— the cost of the ceiling is much smaller than that headline: most of that
+mass is at 1.5–1.75×, which the band already accepts.
+
+| geyser | logger pairs (2015+) | p99 of ratio | logger-derived ceiling | rows a ceiling would admit |
+|---|---:|---:|---:|---:|
+| Old Faithful, Grand, Daisy, Castle, Great Fountain | 445–4,853 | 1.19–1.59 | 1.75 (floor) | 0 |
+| Fountain | 3,018 | 1.89 | 1.89 | 33 (+0.5% of valid) |
+| Artemisia | 689 | 1.83 | 1.83 | 4 (+0.2%) |
+| Lion | 410 | 2.00 | 2.00 | 3 |
+
+Thirty-three intervals in three thousand do not move a rolling-window fit,
+and the genuinely fat tails those geysers have are already represented
+where they matter — at serving time, by the tail component, whose weight is
+measured from exactly these logger pairs (Fountain 6.2%, Artemisia 11%; see
+model-results.md). Fountain's poor honest coverage (90% band catching 46%)
+is observation gaps, not the filter. **The ceiling stays at 1.75× for every
+geyser.** Recorded so the next person does not re-derive it from the same
+histogram.
+
+**One real artefact the measurement turned up, unfixed:** Till's 2017
+logger campaign — 329 consecutive logger pairs with a median gap of 630
+minutes — sits against a local baseline of 362, so 288 of them are rejected
+as "over 1.75×". The sparse-singles p10 anchor is landing on something at
+half the true cycle in that era. It does not touch the served model
+(`adaptive_lognormal` on recent windows, where the baseline is right) and
+Till's 2017 cycle is not today's 729 minutes anyway, but anyone extending
+Till's training history back should know the 2017 record is mostly filtered
+out for the wrong reason.
+
 ### A trap when comparing filter generations
 
 Changing the filter changes *which intervals are in the evaluation set*, so CRPS
