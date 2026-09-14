@@ -506,6 +506,14 @@ def _our_logged_predictions(payload: dict[str, Any]) -> list[LoggedPrediction]:
             continue
 
         geyser = pred["geyser"]
+        modes = (pred.get("explain") or {}).get("modes") or {}
+        boundary = short_p = None
+        if modes.get("split_utc") and modes.get("short", {}).get("prob") is not None:
+            try:
+                boundary = int(pd.Timestamp(modes["split_utc"]).timestamp())
+                short_p = float(modes["short"]["prob"])
+            except (TypeError, ValueError):
+                boundary = short_p = None
         out.append(
             LoggedPrediction(
                 source="geyser_ai",
@@ -518,6 +526,8 @@ def _our_logged_predictions(payload: dict[str, Any]) -> list[LoggedPrediction]:
                 inner_open_epoch=w50[0],
                 inner_close_epoch=w50[1],
                 detail=str(pred.get("model") or ""),
+                mode_boundary_epoch=boundary,
+                mode_short_prob=short_p,
             )
         )
     return out
@@ -668,6 +678,14 @@ def _summarise(
         "n": len(mine),
         "mae_min": round(float(np.mean([r.abs_error_min for r in mine])), 1),
         "median_signed_error_min": median([r.signed_error_min for r in mine]),
+        # Bimodal forecasts (Lion): how good the stated "which mode" probability
+        # was. 0.25 is the score for always saying 50%; lower is better.
+        "mode_brier": (
+            round(float(np.mean([r.mode_brier for r in mine if r.mode_brier is not None])), 3)
+            if any(r.mode_brier is not None for r in mine)
+            else None
+        ),
+        "n_mode_scored": sum(1 for r in mine if r.mode_brier is not None) or None,
         "in_window_rate": (round(n_in_window / len(windowed), 3) if windowed else None),
         # Exact counts, so the dashboard never has to reconstruct "8 of 9" from
         # a rounded rate and get it off by one.
@@ -836,6 +854,9 @@ def get_recent_comparisons(
                 "window_width_min": row.window_width_min,
                 "lead_minutes": row.lead_minutes,
                 "detail": row.detail,
+                "mode_short_prob": row.mode_short_prob,
+                "mode_hit_short": row.mode_hit_short,
+                "mode_brier": row.mode_brier,
             }
 
         comparisons.append(

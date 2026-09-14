@@ -11,6 +11,7 @@ from .config import DB_PATH, PHASE_LIMITED_GEYSERS, PHASE_WINDOW_CYCLES, TARGET_
 from .models import (
     MINOR_MODE_GEYSERS,
     SERIES_GEYSERS,
+    SamplePrediction,
     SeriesConditionalModel,
     default_model_name,
     default_models,
@@ -110,6 +111,40 @@ def logger_tail_weight(geyser: str, db_path=DB_PATH) -> tuple[float, int]:
         con.close()
     out = (tail_weight(ratios), int(len(ratios)))
     _tail_cache[key] = out
+    return out
+
+
+def _two_modes(rpred, split: float, at, last_ts) -> dict:
+    """Both sides of a bimodal forecast, each with its posterior weight.
+
+    `rpred` is the renewal forecast's weighted sample (minutes after the
+    anchor, already conditioned on the silent window), `split` the model's
+    valley between the modes. Probabilities are the weight on each side, so
+    they move as the wait runs on: two hours after a Lion initial with nothing
+    logged, the short mode has mostly drained into the long one.
+    """
+    s, w = rpred.samples, rpred.weights
+    tot = float(w.sum())
+
+    def iso(minutes: float) -> str:
+        return (last_ts + pd.Timedelta(minutes=float(minutes))).floor("s").isoformat()
+
+    out = {"split_min": round(split, 1), "split_utc": iso(split)}
+    for name, mask in (("short", s < split), ("long", s >= split)):
+        p = float(w[mask].sum() / tot) if tot > 0 else float("nan")
+        entry: dict = {"prob": round(p, 3)}
+        if mask.sum() >= 20 and p > 0.005:
+            sub = SamplePrediction(s[mask], w[mask], "mode")
+            med = sub.median()
+            lo, hi = sub.interval(0.50)
+            entry.update(
+                median_interval_min=round(med, 1),
+                predicted_utc=iso(med),
+                predicted_time_local=at(med),
+                window_50_local=[at(lo), at(hi)],
+                window_50_utc=[iso(lo), iso(hi)],
+            )
+        out[name] = entry
     return out
 
 
@@ -326,6 +361,22 @@ def predict_geyser(
                 "window_50_local": [at(a_lo), at(a_hi)],
                 "naive_median_interval_min": round(alt.median(), 1),
             }
+
+    # A series geyser's forecast is a coin flip between two modes, and no
+    # single time summarises one: after a mid-series Lion the median (~440
+    # min) sits in the valley between "another in ~80 min" and "the next
+    # series in ~10 h", where Lion never erupts -- 36% of live Lion rows
+    # landed on the wrong side of it. Serve both modes with the posterior
+    # probability the renewal forecast puts on each, so the card can say
+    # "55% about 19:00, otherwise about 03:30" and the ledger can score the
+    # stated probability. The split is the model's own valley.
+    if geyser in SERIES_GEYSERS:
+        modes = SeriesConditionalModel()._modes(
+            hist.tail(600)["interval_min"].to_numpy(dtype=float)
+        )
+        if modes is not None:
+            _, _, split = modes
+            explain["modes"] = _two_modes(rpred, float(split), at, last_ts)
 
     # Flag the regime so the caller knows which answer they are looking at.
     stale = exp_missed >= 0.5

@@ -75,6 +75,11 @@ class LoggedPrediction:
     inner_open_epoch: int | None = None
     inner_close_epoch: int | None = None
     detail: str = ""
+    # A bimodal forecast (Lion) also states the probability that the eruption
+    # falls BEFORE the valley between its modes. The point estimate of such a
+    # forecast is a poor summary; this is the claim worth scoring.
+    mode_boundary_epoch: int | None = None
+    mode_short_prob: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -118,6 +123,11 @@ class ScoredPrediction:
     # ledgers written before these existed must still load.
     inner_open_epoch: int | None = None
     inner_close_epoch: int | None = None
+    # Brier score of the stated short-mode probability, 0 (perfect) to 1;
+    # 0.25 is what always saying 50% earns. None where no mode was stated.
+    mode_brier: float | None = None
+    mode_short_prob: float | None = None
+    mode_hit_short: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -181,6 +191,10 @@ def score_one(pred: LoggedPrediction, eruption: Eruption) -> ScoredPrediction:
     width = None
     if pred.window_open_epoch is not None and pred.window_close_epoch is not None:
         width = (pred.window_close_epoch - pred.window_open_epoch) / 60.0
+    brier = hit_short = None
+    if pred.mode_boundary_epoch is not None and pred.mode_short_prob is not None:
+        hit_short = eruption.epoch < pred.mode_boundary_epoch
+        brier = round((pred.mode_short_prob - float(hit_short)) ** 2, 4)
 
     return ScoredPrediction(
         source=pred.source,
@@ -200,6 +214,9 @@ def score_one(pred: LoggedPrediction, eruption: Eruption) -> ScoredPrediction:
         detail=pred.detail,
         inner_open_epoch=pred.inner_open_epoch,
         inner_close_epoch=pred.inner_close_epoch,
+        mode_brier=brier,
+        mode_short_prob=pred.mode_short_prob,
+        mode_hit_short=hit_short,
     )
 
 

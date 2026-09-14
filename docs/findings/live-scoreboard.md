@@ -285,6 +285,34 @@ Regression-tested in `tests/test_chain.py` with entries that exist only in
 the sync table, including the post-minor regime baseline and a precursor
 minor that must stay out of the chain.
 
+## The seventh catch: Lion's point prediction is the valley (2026-09-14)
+
+Of 126 scored Lion rows, 17% predicted in-series and got a series gap and
+19% the reverse — a median |error| of 95 min hiding an MAE of 213. After a
+mid-series eruption the series model's continue probability is ~0.5, so its
+median (~440 min) sits between an 85-min mode and a 10-hour mode, at a time
+Lion never erupts. This is the Old Faithful "constant 93" failure again,
+structural this time rather than a bug: no single time summarises a coin
+flip.
+
+Looked for anything that moves the coin, on five years of non-initial
+anchors (n=4,986): position in series flat (0.50, 0.48, 0.52, 0.44, 0.54…),
+anchor duration, hour and month all within ±0.05. The one signal — a
+preceding in-series spacing over 90 min drops p(continue) from ~0.59 to
+~0.41 — was put into the model and paired-bootstrapped on 1,500 targets:
+−0.08 min CRPS, 95% CI [−0.63, +0.46]. Not decisive; the model stays.
+
+What shipped is presentation and scoring. `explain.modes` carries both
+sides of the renewal forecast split at the model's own valley, each with
+its posterior weight (which drains from short to long as the wait runs on),
+its median and 50% window. When both are live the card reads "Either 19:00
+(55%) or 03:30 (45%)" and the countdown carries the likelier one. The
+ledger logs the boundary and the short-mode probability and scores it as a
+**Brier** (`mode_brier`; 0.25 = always saying 50%), summarised per source
+and shown on the scoreboard. The single-band row is unchanged, so the
+leaderboard's central-interval numbers stay poor for Lion by construction —
+that is now stated on the method page instead of listed as a gap to fix.
+
 ## Footnotes for data-quality.md
 
 - The ledger scored an Old Faithful eruption at 08-06 15:32 UTC that no longer

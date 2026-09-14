@@ -676,3 +676,42 @@ class TestCalibrationBoundary:
         # The record start is source-blind: the comparison runs every source
         # over the same window, so third-party era rows are aligned out too.
         assert ("nps", before) not in epochs
+
+
+class TestModeScoring:
+    """A bimodal forecast states which side of its valley the eruption lands on."""
+
+    def test_brier_scores_the_stated_short_mode_probability(self):
+        p = LoggedPrediction(
+            source="geyser_ai",
+            geyser="Lion",
+            key="k",
+            issued_epoch=NOW,
+            predicted_epoch=NOW + 7 * HOUR,
+            mode_boundary_epoch=NOW + 3 * HOUR,
+            mode_short_prob=0.55,
+        )
+        short = score_one(p, erupt(geyser="Lion", epoch=NOW + 80 * 60))
+        assert short.mode_hit_short is True
+        assert short.mode_brier == pytest.approx((0.55 - 1) ** 2, abs=1e-4)
+        long = score_one(p, erupt(geyser="Lion", epoch=NOW + 9 * HOUR))
+        assert long.mode_hit_short is False
+        assert long.mode_brier == pytest.approx(0.55**2, abs=1e-4)
+
+    def test_a_unimodal_forecast_has_no_mode_score(self):
+        s = score_one(pred("geyser_ai"), erupt())
+        assert s.mode_brier is None and s.mode_hit_short is None
+
+    def test_old_ledger_rows_still_load(self):
+        from geyser_ai.scoring import ScoredPrediction
+
+        row = ScoredPrediction.from_dict(
+            {
+                "source": "nps", "geyser": "Grand", "eruption_id": 1, "actual_epoch": NOW,
+                "issued_epoch": NOW, "predicted_epoch": NOW, "signed_error_min": 0.0,
+                "abs_error_min": 0.0, "lead_minutes": 0.0, "in_window": None,
+                "window_width_min": None, "window_open_epoch": None,
+                "window_close_epoch": None, "in_inner_window": None, "detail": "",
+            }
+        )  # fmt: skip
+        assert row.mode_brier is None

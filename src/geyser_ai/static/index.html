@@ -978,10 +978,26 @@ function card(p){
   // explicitly rather than letting the number drift and confuse people.
   const overdue = !live && p.overdue && p.current_cycle_prob > 0.15;
   if (overdue) el.classList.add("overdue");
+  // Two live modes (Lion after a mid-series eruption): the median sits in the
+  // valley between "another in ~80 min" and "the next series in ~10 h", a time
+  // the geyser never erupts at. Say both, with the odds, and let the likelier
+  // one carry the countdown.
+  const modes = (p.explain||{}).modes;
+  const twoModes = !live && modes && modes.short && modes.long
+    && modes.short.predicted_utc && modes.long.predicted_utc
+    && modes.short.prob >= 0.15 && modes.long.prob >= 0.15;
+  const nowMs = Date.now();
+  const modeLine = (m) => `${hhmm(m.predicted_utc)} (${Math.round(m.prob*100)}%)`;
+  const untilText = twoModes
+    ? (() => {
+        const lead = modes.short.prob >= modes.long.prob ? modes.short : modes.long;
+        return `${Math.round(lead.prob*100)}%: ${humanMins((new Date(lead.predicted_utc) - nowMs)/60000)}`;
+      })()
+    : humanMins(minsUntil);
   el.innerHTML = `
     <div class="row1">
       <h3 class="name">${p.geyser}</h3>
-      <div class="until">${humanMins(minsUntil)}</div>
+      <div class="until">${untilText}</div>
     </div>
     ${overdue ? `<div class="overdue-note">${
         // "Any minute" is only honest when the forecast means it: a watched
@@ -995,7 +1011,9 @@ function card(p){
         p.regime_detail && p.regime_detail.indicator_elapsed_min != null
           ? ` — started ${Math.round(p.regime_detail.indicator_elapsed_min)} min ago` : ""
       }</div>` : ""}
-    <div class="at">${hhmm(p.predicted_utc)} most likely${beyond ? " · beyond the axis" : ""}</div>`;
+    ${twoModes
+      ? `<div class="at">Either <b>${modeLine(modes.short)}</b> or <b>${modeLine(modes.long)}</b></div>`
+      : `<div class="at">${hhmm(p.predicted_utc)} most likely${beyond ? " · beyond the axis" : ""}</div>`}`;
 
   el.appendChild(ribbon(p));
 
@@ -1336,6 +1354,10 @@ function sbSource(meta, s, span){
     st.push(`<span><b>in its 50%</b> ${pctText(s.in_50_rate)} · ${
       s.n_in_50}/${s.n_inner}${s.median_window_50_width_min != null
         ? ` <i>of a ${num(s.median_window_50_width_min)} min window</i>` : ""}</span>`);
+  if (s.mode_brier != null)
+    // Bimodal forecasts state which mode; 0.25 is "always 50%", lower is better.
+    st.push(`<span><b>which mode</b> Brier ${s.mode_brier.toFixed(2)} · ${
+      s.n_mode_scored} scored <i>(0.25 = a coin flip)</i></span>`);
   if (s.coverage != null)
     st.push(`<span><b>covered</b> ${pctText(s.coverage)} of eruptions</span>`);
 

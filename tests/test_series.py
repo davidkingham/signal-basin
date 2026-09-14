@@ -12,6 +12,7 @@ series-conditional model that the structure exists to feed.
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from geyser_ai.backtest import load_intervals
 from geyser_ai.models import SeriesConditionalModel
@@ -113,3 +114,19 @@ class TestServingPath:
         assert alt["condition"] != br["condition"]
         assert alt["predicted_utc"] and alt["median_interval_min"] > 0
         assert alt["naive_median_interval_min"] != r["naive_median_interval_min"]
+
+    def test_lion_serves_both_modes_with_their_probability(self):
+        """A single time for a coin flip between ~80 min and ~10 h is the
+        valley where Lion never erupts. The card gets both modes."""
+        from geyser_ai.predict import predict_geyser
+
+        r = predict_geyser("Lion")
+        modes = r["explain"]["modes"]
+        assert 100 < modes["split_min"] < 400
+        short, long = modes["short"], modes["long"]
+        assert short["prob"] + long["prob"] == pytest.approx(1.0, abs=0.002)
+        # The fixture's last Lion is minutes old, so both modes are live.
+        assert 0.1 < short["prob"] < 0.95, short
+        assert short["median_interval_min"] < modes["split_min"] < long["median_interval_min"]
+        assert short["predicted_utc"] < modes["split_utc"] < long["predicted_utc"]
+        assert short["window_50_utc"][0] <= short["predicted_utc"] <= short["window_50_utc"][1]

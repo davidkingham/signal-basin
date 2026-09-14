@@ -857,14 +857,24 @@ GEYSER_NOTES: dict[str, dict[str, Any]] = {
         ],
     },
     "Lion": {
-        "summary": "The series geyser: two modes, and a distribution shape that is still wrong.",
+        "summary": "The series geyser: two modes, served as two answers with the odds on each.",
         "why": (
             "Lion erupts in series — an initial eruption flagged by the observer, one to five "
             "more at ~83-minute spacing, then 7.8–14.7 hours of quiet. The served model "
             "branches on that initial flag and fits each branch as a two-component mixture "
             "weighted by the branch's measured continue rate: about 82% continue after an "
             "initial, about 40% after a later eruption. It is decisively ahead of the default, "
-            "so it is pinned."
+            "so it is pinned. "
+            "After a mid-series eruption the forecast is close to a coin flip between "
+            '"another in about 80 minutes" and "the next series in about 10 hours", and '
+            "no single time summarises that: the median lands in the valley between the "
+            "modes, where Lion never erupts, and 36% of scored Lion rows landed on the wrong "
+            "side of it. So the card names both modes with the probability the forecast puts "
+            "on each — probabilities that move as the wait runs on and the short mode drains "
+            "into the long one — and the scoreboard scores that stated probability as a Brier "
+            "score, where 0.25 is what always saying 50% would earn. The one candidate signal "
+            "for sharpening the odds, the spacing of the previous in-series interval, was "
+            "tested and is not decisive (−0.08 min CRPS, 95% CI [−0.63, +0.46])."
         ),
         "data": (
             "70% webcam. Only 11% of raw gaps are rejected — second cleanest in the set — but "
@@ -874,8 +884,9 @@ GEYSER_NOTES: dict[str, dict[str, Any]] = {
         "gaps": [
             "The nominal 50% interval is far too wide, and the honest 50% is poor for a "
             "structural reason rather than a fixable calibration one: with a bimodal spread the "
-            "central band often straddles the empty valley between the two modes. A better "
-            "answer here is a different shape of interval, not a wider or narrower one.",
+            "central band often straddles the empty valley between the two modes. The two-mode "
+            "card answers that on the face; the single-band ledger row and the leaderboard "
+            "still score the central interval, so those numbers stay poor by construction.",
             "The unconditional models cover only ~33% of their nominal 50% here, which is worth "
             "seeing on the leaderboard below: a unimodal fit cannot cover a bimodal reality no "
             "matter how far it stretches.",
