@@ -27,7 +27,11 @@ its known gaps ("how this is modelled") — with the full working, per geyser,
 at [signalbasin.org/method](https://signalbasin.org/method). A public scoreboard
 scores every prediction against the NPS and Geysers.net over the identical
 window, with the record starting 2026-08-09 — the day the calibrated system went
-live. See
+live. Models train on the live sync as well as the archive snapshot, the served
+tail is measured per geyser from the logger record, Daisy carries a lag-1
+memory term, Lion's card names both of its modes with the odds on each, and a
+geyser is pinned to a model only when a paired bootstrap says the margin is
+real. See
 [`reports/calibration_report.md`](reports/calibration_report.md) for the full
 metrics table and [`docs/findings/`](docs/findings/README.md) for everything
 learned along the way, negative results included.

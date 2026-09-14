@@ -17,12 +17,13 @@ live through it. Two rules the whole set follows:
 
 | Document | What is in it |
 |---|---|
-| [data-quality.md](data-quality.md) | The GeyserTimes archive and API as they actually behave: the four generations of the interval validity filter, the traps in the data, the API quirks |
+| [data-quality.md](data-quality.md) | The GeyserTimes archive and API as they actually behave: the seven generations of the interval validity filter (one rejected), the traps in the data, the API quirks |
 | [model-results.md](model-results.md) | Every model tried, what won, what lost, why production serves what it serves, and the leakage bug that made a model look good |
 | [external-forcings.md](external-forcings.md) | Whether weather, tides, rainfall, earthquakes and hydrology move eruption intervals. Mostly: no. Literature synthesis plus our own in-database interaction work |
 | [engineering-notes.md](engineering-notes.md) | Deploying a Python/DuckDB/SciPy stack on Cloudflare Containers, and the things that cost hours |
 | [seismic.md](seismic.md) | The public Yellowstone seismic network measured against real eruptions: what it covers, the calibrated Steamboat signature, and why the single-station detector is not shippable |
-| [live-scoreboard.md](live-scoreboard.md) | First live comparison against NPS and Geysers.net, and the serving-path bug it caught: production discarded the conditional model and served the unconditional marginal on Old Faithful and Castle |
+| [live-scoreboard.md](live-scoreboard.md) | The live comparison against NPS and Geysers.net, and the seven catches it produced: a discarded conditional model, "overdue" at 9am, a nowcast blind to live data, an anchor edited under a visitor, a scoreboard scoring its own censoring rule, production training on a six-week-old snapshot, and a point prediction in the valley between Lion's modes |
+| [methods-audit-2026-09.md](methods-audit-2026-09.md) | The September 2026 audit of the calculations: seven findings ranked by minutes at stake, what each turned out to be worth once measured, and what was rejected |
 
 ## The one-paragraph summary
 
@@ -34,13 +35,18 @@ Lone Star's entire cycle. The best covariates in the project — the `minor`
 and `initial` flags — were already in the archive, recorded by volunteers.
 The most sophisticated model, a survival regression with covariates, finished
 in the bottom half on every unimodal geyser. Going live taught its own
-lessons: the prospective scoreboard caught three serving bugs the backtest
-never could (a discarded conditional model, observation completeness read at
-the wrong hour, a nowcast blind to live data), and the seismic work produced
-four rounds of validated negative results before one season-aware watch
-earned its place. Of the external forcings the literature proposes, exactly
-one is real and large enough to matter for prediction (wind on Daisy), and we
-have not implemented it yet.
+lessons: the prospective scoreboard caught serving bugs the backtest never
+could (a discarded conditional model, observation completeness read at the
+wrong hour, a nowcast blind to live data, and — a month in — that the
+scoreboard's own censoring rule never bound and that production was training
+on a six-week-old snapshot), and the seismic work produced four rounds of
+validated negative results before one season-aware watch earned its place.
+The September 2026 audit then overturned a rule everyone had trusted: "a
+margin under 6% is noise" was never tested, and a paired bootstrap on the
+identical eruptions showed four of those margins were certainties. Of the
+external forcings the literature proposes, exactly one is real and large
+enough to matter for prediction (wind on Daisy); its persistence from one
+interval to the next is now in the model, its onset is not.
 
 ## Conventions
 
